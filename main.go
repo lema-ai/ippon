@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"strings"
 
 	"github.com/google/go-containerregistry/pkg/authn"
 	"github.com/google/go-containerregistry/pkg/name"
@@ -131,6 +132,14 @@ func buildAndPublishService(ctx context.Context, cmdDir, serviecName, repo strin
 	if err != nil {
 		return err
 	}
+
+  digest, err := r.Digest()
+  if err != nil {
+    return err
+  }
+
+  digestTag := strings.TrimPrefix(digest.String(), "sha256:")
+  tags = append(tags, digestTag)
 
 	p, err := publish.NewDefault(repo,
 		publish.WithTags(tags),
