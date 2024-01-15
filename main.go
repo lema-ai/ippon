@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"log"
 	"os"
@@ -13,8 +12,10 @@ import (
 	"github.com/google/go-containerregistry/pkg/v1/remote"
 	"github.com/google/ko/pkg/build"
 	"github.com/google/ko/pkg/publish"
+	"github.com/pkg/errors"
 	"github.com/spf13/pflag"
 	"github.com/spf13/viper"
+	"golang.org/x/sync/errgroup"
 )
 
 const (
@@ -96,21 +97,35 @@ func main() {
 	}
 
 	ctx := context.Background()
+	var g errgroup.Group
+
 	for _, service := range services.Services {
-		fmt.Printf("building service: %+v\n", service)
+		service := service
+		g.Go(func() error {
+			return buildService(ctx, service)
+		})
 
-		registry, err := service.GetRegistry()
-		if err != nil {
-			log.Fatalf("failed getting container registry: %v", err)
-		}
-
-		tags := service.GetTags()
-
-		err = buildAndPublishService(ctx, service.Main, service.Name, registry, tags)
-		if err != nil {
-			log.Fatalf("failed to build service: %v\n", err)
-		}
 	}
+	if err := g.Wait(); err != nil {
+		log.Fatal("Build failed", err)
+	}
+}
+
+func buildService(ctx context.Context, service ServiceConfig) error {
+	// fmt.Printf("building service: %+v\n", service)
+	registry, err := service.GetRegistry()
+	if err != nil {
+		log.Fatalf("failed getting container registry: %v", err)
+	}
+
+	tags := service.GetTags()
+
+	err = buildAndPublishService(ctx, service.Main, service.Name, registry, tags)
+	if err != nil {
+		return errors.Wrap(err, "build and push service")
+	}
+
+	return nil
 }
 
 func buildAndPublishService(ctx context.Context, cmdDir, serviecName, repo string, tags []string) error {
@@ -133,13 +148,13 @@ func buildAndPublishService(ctx context.Context, cmdDir, serviecName, repo strin
 		return err
 	}
 
-  digest, err := r.Digest()
-  if err != nil {
-    return err
-  }
+	digest, err := r.Digest()
+	if err != nil {
+		return err
+	}
 
-  digestTag := strings.TrimPrefix(digest.String(), "sha256:")
-  tags = append(tags, digestTag)
+	digestTag := strings.TrimPrefix(digest.String(), "sha256:")
+	tags = append(tags, digestTag)
 
 	p, err := publish.NewDefault(repo,
 		publish.WithTags(tags),
