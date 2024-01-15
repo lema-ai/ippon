@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"log"
@@ -26,6 +27,8 @@ const (
 
 var (
 	isOktetoContext = false
+	verbose         = false
+	outputBuffer    bytes.Buffer // easier debugging in case of errors, buffer to store output when running in non verbose mode
 )
 
 type ServicesConfig struct {
@@ -72,6 +75,7 @@ func (this ServiceConfig) GetTags() []string {
 
 func init() {
 	pflag.BoolVar(&isOktetoContext, "okteto", false, "in Okteto context")
+	pflag.BoolVar(&verbose, "verbose", false, "verbose output")
 
 	viper.SetConfigName(configFileName)
 	viper.SetConfigType("yaml")
@@ -80,20 +84,31 @@ func init() {
 	viper.AutomaticEnv()
 
 	viper.BindPFlag("okteto", pflag.Lookup("okteto"))
+	viper.BindPFlag("verbose", pflag.Lookup("v"))
+}
+
+func finishWithError(msg string, err error) {
+	fmt.Print(outputBuffer.String())
+	log.SetOutput(os.Stdout)
+	log.Fatalf("%s: %+v\n", msg, err)
 }
 
 // TODO: build it with cobra
 func main() {
 	err := viper.ReadInConfig()
 	if err != nil {
-		log.Fatalf("fatal error config file: %v\n", err)
+		finishWithError("fatal error config file", err)
 	}
 	pflag.Parse()
+
+	if !verbose {
+		log.SetOutput(&outputBuffer)
+	}
 
 	var services ServicesConfig
 	err = viper.Unmarshal(&services)
 	if err != nil {
-		log.Fatalf("failed getting services from config: %v\n", err)
+		finishWithError("failed getting services from config", err)
 	}
 
 	ctx := context.Background()
@@ -107,15 +122,15 @@ func main() {
 
 	}
 	if err := g.Wait(); err != nil {
-		log.Fatal("Build failed", err)
+		finishWithError("fatal error while building service", err)
 	}
 }
 
 func buildService(ctx context.Context, service ServiceConfig) error {
-	// fmt.Printf("building service: %+v\n", service)
+	log.Printf("ippon building service: %+v\n", service)
 	registry, err := service.GetRegistry()
 	if err != nil {
-		log.Fatalf("failed getting container registry: %v", err)
+		return errors.Wrap(err, "get container registry")
 	}
 
 	tags := service.GetTags()
@@ -140,17 +155,17 @@ func buildAndPublishService(ctx context.Context, cmdDir, serviecName, repo strin
 	)
 
 	if err != nil {
-		return err
+		return errors.Wrap(err, "build go image")
 	}
 
 	r, err := b.Build(ctx, "")
 	if err != nil {
-		return err
+		return errors.Wrap(err, "build image")
 	}
 
 	digest, err := r.Digest()
 	if err != nil {
-		return err
+		return errors.Wrap(err, "get image digest")
 	}
 
 	digestTag := strings.TrimPrefix(digest.String(), "sha256:")
@@ -160,16 +175,16 @@ func buildAndPublishService(ctx context.Context, cmdDir, serviecName, repo strin
 		publish.WithTags(tags),
 		getAuthOption(),
 	)
-
 	if err != nil {
-		return err
+		return errors.Wrap(err, "authenticate to image repo")
 	}
+
 	ref, err := p.Publish(ctx, r, serviecName)
 	if err != nil {
-		return err
+		return errors.Wrap(err, "publish image")
 	}
 
-	fmt.Println(ref.String())
+	log.Println(ref.String())
 	return nil
 }
 
