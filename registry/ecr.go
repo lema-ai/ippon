@@ -50,11 +50,10 @@ func (this *ECR) RepositoryExists(ctx context.Context, repo string) (bool, error
 	}
 
 	_, err := this.client.DescribeRepositories(ctx, params)
-	if strings.Contains(err.Error(), "RepositoryNotFoundException") {
-		return false, nil
-	}
-
 	if err != nil {
+		if strings.Contains(err.Error(), "RepositoryNotFoundException") {
+			return false, nil
+		}
 		return false, err
 	}
 
