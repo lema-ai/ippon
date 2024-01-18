@@ -13,11 +13,29 @@ import (
 	"github.com/google/go-containerregistry/pkg/v1/remote"
 	"github.com/google/ko/pkg/build"
 	"github.com/google/ko/pkg/publish"
+	"github.com/lema-ai/ippon/registry"
 	"github.com/pkg/errors"
+	"github.com/spf13/cobra"
 	"github.com/spf13/pflag"
 	"github.com/spf13/viper"
 	"golang.org/x/sync/errgroup"
 )
+
+type Registry interface {
+	Init(context.Context) error
+	URL() string
+}
+
+type CreateRepoRegistry interface {
+	Registry
+	RepositoryExists(ctx context.Context, repo string) (bool, error)
+	CreateRepository(ctx context.Context, repo string) error
+}
+
+type SelfAuthRegistry interface {
+	Registry
+	GetAuthOption() publish.Option
+}
 
 const (
 	baseImage       = "cgr.dev/chainguard/static:latest"
@@ -26,124 +44,83 @@ const (
 )
 
 var (
-	isOktetoContext = false
-	verbose         = false
-	outputBuffer    bytes.Buffer // easier debugging in case of errors, buffer to store output when running in non verbose mode
+	verbose      = false
+	outputBuffer bytes.Buffer // easier debugging in case of errors, buffer to store output when running in non verbose mode
 )
 
-type ServicesConfig struct {
-	Services []ServiceConfig `mapstructure:"services"`
-}
-
-type ServiceConfig struct {
-	Name     string   `mapstructure:"name"`
-	Main     string   `mapstructure:"main"`
-	Registry string   `mapstructure:"registry"`
-	Tags     []string `mapstructure:"tags"`
-}
-
-func (this ServiceConfig) GetRegistry() (string, error) {
-	// Ignore configs on Okteto context
-	if isOktetoContext {
-		registryUrl, exists := os.LookupEnv("OKTETO_REGISTRY_URL")
-		if !exists {
-			return "", errors.New("Failed getting Okteto's registry: OKTETO_REGISTRY_URL not set")
-		}
-
-		namespace, exists := os.LookupEnv("OKTETO_NAMESPACE")
-		if !exists {
-			return "", errors.New("Failed getting Okteto's registry: OKTETO_NAMESPACE not set")
-		}
-
-		return fmt.Sprintf("%s/%s", registryUrl, namespace), nil
-	}
-
-	if this.Registry != "" {
-		return this.Registry, nil
-	}
-
-	return viper.GetString("registry.ecr"), nil
-}
-
-func (this ServiceConfig) GetTags() []string {
-	if this.Tags != nil {
-		return this.Tags
-	}
-
-	return viper.GetStringSlice("tags")
-}
-
-func init() {
-	pflag.BoolVar(&isOktetoContext, "okteto", false, "in Okteto context")
-	pflag.BoolVar(&verbose, "verbose", false, "verbose output")
-
-	viper.SetConfigName(configFileName)
-	viper.SetConfigType("yaml")
-	viper.AddConfigPath(".")
-	viper.SetEnvPrefix(configEnvPrefix)
-	viper.AutomaticEnv()
-
-	viper.BindPFlag("okteto", pflag.Lookup("okteto"))
-	viper.BindPFlag("verbose", pflag.Lookup("v"))
-}
-
-func finishWithError(msg string, err error) {
-	fmt.Print(outputBuffer.String())
-	log.SetOutput(os.Stdout)
-	log.Fatalf("%s: %+v\n", msg, err)
-}
-
-// TODO: build it with cobra
-func main() {
-	err := viper.ReadInConfig()
-	if err != nil {
-		finishWithError("fatal error config file", err)
-	}
-	pflag.Parse()
-
-	if !verbose {
-		log.SetOutput(&outputBuffer)
-	}
-
-	var services ServicesConfig
-	err = viper.Unmarshal(&services)
-	if err != nil {
-		finishWithError("failed getting services from config", err)
-	}
-
+func buildRegistryCommand(cmdName string, registry Registry, servicesConfig ServicesConfig) (*cobra.Command, error) {
 	ctx := context.Background()
-	var g errgroup.Group
 
-	for _, service := range services.Services {
-		service := service
-		g.Go(func() error {
-			return buildService(ctx, service)
-		})
+	registryCmd := &cobra.Command{
+		Use:  cmdName,
+		Args: cobra.MinimumNArgs(1),
+		PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
+			return registry.Init(ctx)
+		},
+	}
 
+	releaseCmd := &cobra.Command{
+		Use:   "release",
+		Short: "Build, tag and push an image",
+		Run: func(cmd *cobra.Command, args []string) {
+			authOption := getRegistryAuthOption(registry)
+
+			var g errgroup.Group
+			for _, service := range servicesConfig.Services {
+				service := service
+				g.Go(func() error {
+					log.Printf("ippon building service: %+v\n", service)
+					baseURL := registry.URL()
+					tags := service.GetTags()
+
+					err := buildAndPublishService(ctx, service.Main, service.Name, baseURL, tags, authOption)
+					if err != nil {
+						return errors.Wrap(err, "build and push service")
+					}
+
+					return nil
+				})
+
+			}
+			if err := g.Wait(); err != nil {
+				finishWithError("fatal error while building service", err)
+			}
+
+		},
 	}
-	if err := g.Wait(); err != nil {
-		finishWithError("fatal error while building service", err)
+
+	registryCmd.AddCommand(releaseCmd)
+
+	if createRepo, ok := registry.(CreateRepoRegistry); ok {
+		createMissingCmd := &cobra.Command{
+			Use:   "create-missing-repos",
+			Short: "Create required and missing repositories in the registry",
+			RunE: func(cmd *cobra.Command, args []string) error {
+				for _, s := range servicesConfig.Services {
+					repo := s.Name
+					exists, err := createRepo.RepositoryExists(ctx, repo)
+					if err != nil {
+						return err
+					}
+
+					if !exists {
+						err := createRepo.CreateRepository(ctx, repo)
+						if err != nil {
+							return err
+						}
+						log.Printf("repository created in registry: %s\n", repo)
+					}
+				}
+				return nil
+			},
+		}
+		registryCmd.AddCommand(createMissingCmd)
 	}
+
+	return registryCmd, nil
 }
 
-func buildService(ctx context.Context, service ServiceConfig) error {
-	log.Printf("ippon building service: %+v\n", service)
-	registry, err := service.GetRegistry()
-	if err != nil {
-		return errors.Wrap(err, "get container registry")
-	}
-
-	tags := service.GetTags()
-
-	err = buildAndPublishService(ctx, service.Main, service.Name, registry, tags)
-	if err != nil {
-		return errors.Wrap(err, "build and push service")
-	}
-
-	return nil
-}
-
-func buildAndPublishService(ctx context.Context, cmdDir, serviecName, repo string, tags []string) error {
+func buildAndPublishService(ctx context.Context, cmdDir, serviecName, baseURL string, tags []string, authOption publish.Option) error {
 	b, err := build.NewGo(ctx, cmdDir,
 		build.WithPlatforms("linux/amd64"),
 		build.WithDisabledSBOM(),
@@ -171,9 +148,9 @@ func buildAndPublishService(ctx context.Context, cmdDir, serviecName, repo strin
 	digestTag := strings.TrimPrefix(digest.String(), "sha256:")
 	tags = append(tags, digestTag)
 
-	p, err := publish.NewDefault(repo,
+	p, err := publish.NewDefault(baseURL,
 		publish.WithTags(tags),
-		getAuthOption(),
+		authOption,
 	)
 	if err != nil {
 		return errors.Wrap(err, "authenticate to image repo")
@@ -188,15 +165,92 @@ func buildAndPublishService(ctx context.Context, cmdDir, serviecName, repo strin
 	return nil
 }
 
-func getAuthOption() publish.Option {
-	if isOktetoContext {
-		return publish.WithAuth(&authn.Basic{
-			Username: os.Getenv("OKTETO_USERNAME"),
-			Password: os.Getenv("OKTETO_TOKEN"),
-		})
+func getRegistryAuthOption(registry Registry) publish.Option {
+	if authReg, ok := registry.(SelfAuthRegistry); ok {
+		return authReg.GetAuthOption()
+	}
+	// use credentials from ~/.docker/config.json.
+	log.Println("Using the default docker config.json credentials for login")
+	return publish.WithAuthFromKeychain(authn.DefaultKeychain)
+}
+
+type ServicesConfig struct {
+	Services []ServiceConfig `mapstructure:"services"`
+}
+
+type ServiceConfig struct {
+	Name string `mapstructure:"name"`
+	Main string `mapstructure:"main"`
+	// Registry string   `mapstructure:"registry"`
+	Tags []string `mapstructure:"tags"`
+}
+
+func (this ServiceConfig) GetTags() []string {
+	if this.Tags != nil {
+		return this.Tags
 	}
 
-	// use credentials from ~/.docker/config.json.
-	return publish.WithAuthFromKeychain(authn.DefaultKeychain)
+	return viper.GetStringSlice("tags")
+}
 
+func finishWithError(msg string, err error) {
+	fmt.Print(outputBuffer.String())
+	log.SetOutput(os.Stdout)
+	log.Fatalf("%s: %v\n", msg, err)
+}
+
+func init() {
+	pflag.BoolVar(&verbose, "verbose", false, "verbose output")
+
+	viper.SetConfigName(configFileName)
+	viper.SetConfigType("yaml")
+	viper.AddConfigPath(".")
+	viper.SetEnvPrefix(configEnvPrefix)
+	viper.AutomaticEnv()
+
+	viper.BindPFlag("verbose", pflag.Lookup("v"))
+}
+
+func main() {
+	err := viper.ReadInConfig()
+	if err != nil {
+		finishWithError("fatal error config file", err)
+	}
+	pflag.Parse()
+
+	if !verbose {
+		log.SetOutput(&outputBuffer)
+	}
+
+	var services ServicesConfig
+	err = viper.Unmarshal(&services)
+	if err != nil {
+		finishWithError("failed getting services from config", err)
+	}
+
+	okteto := new(registry.Okteto)
+	oktetoCommand, err := buildRegistryCommand("okteto", okteto, services)
+	if err != nil {
+		finishWithError("failed creating okteto command", err)
+	}
+
+	accountId := viper.GetString("ecr.account")
+	region := viper.GetString("ecr.region")
+	ecr := registry.NewECR(accountId, region)
+	ecrCommand, err := buildRegistryCommand("ecr", ecr, services)
+	if err != nil {
+		finishWithError("failed creating ecr command", err)
+	}
+
+	rootCmd := &cobra.Command{
+		Use:   "ippon",
+		Short: "Ippon build and release Go images",
+		Long:  "Ippon make it easy to handle Go images release in a micro-services architecture",
+	}
+
+	rootCmd.AddCommand(oktetoCommand, ecrCommand)
+	err = rootCmd.Execute()
+	if err != nil {
+		finishWithError("failed executing command", err)
+	}
 }
