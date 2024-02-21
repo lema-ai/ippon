@@ -38,7 +38,8 @@ type SelfAuthRegistry interface {
 }
 
 const (
-	baseImage       = "cgr.dev/chainguard/static:latest"
+	// baseImage       = "cgr.dev/chainguard/static:latest"
+	baseImage       = "cgr.dev/chainguard/go:latest"
 	configFileName  = "ippon"
 	configEnvPrefix = "IPPON"
 )
