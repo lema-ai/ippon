@@ -38,10 +38,9 @@ type SelfAuthRegistry interface {
 }
 
 const (
-	// baseImage       = "cgr.dev/chainguard/static:latest"
-	baseImage       = "cgr.dev/chainguard/go:latest"
-	configFileName  = "ippon"
-	configEnvPrefix = "IPPON"
+	defaultBaseImage = "cgr.dev/chainguard/busybox:latest"
+	configFileName   = "ippon"
+	configEnvPrefix  = "IPPON"
 )
 
 var (
@@ -73,8 +72,9 @@ func buildRegistryCommand(cmdName string, registry Registry, servicesConfig Serv
 					log.Printf("ippon building service: %+v\n", service)
 					baseURL := registry.URL()
 					tags := service.GetTags()
+					baseImage := service.GetBaseImage()
 
-					err := buildAndPublishService(ctx, service.Main, service.Name, baseURL, tags, authOption)
+					err := buildAndPublishService(ctx, service.Main, service.Name, baseURL, baseImage, tags, authOption)
 					if err != nil {
 						return errors.Wrap(err, "build and push service")
 					}
@@ -121,12 +121,15 @@ func buildRegistryCommand(cmdName string, registry Registry, servicesConfig Serv
 	return registryCmd, nil
 }
 
-func buildAndPublishService(ctx context.Context, cmdDir, serviecName, baseURL string, tags []string, authOption publish.Option) error {
+func buildAndPublishService(ctx context.Context, cmdDir, serviecName, baseURL, baseImage string, tags []string, authOption publish.Option) error {
 	b, err := build.NewGo(ctx, cmdDir,
 		build.WithPlatforms("linux/amd64"),
 		build.WithDisabledSBOM(),
 		build.WithBaseImages(func(ctx context.Context, _ string) (name.Reference, build.Result, error) {
-			ref := name.MustParseReference(baseImage)
+			ref, err := name.ParseReference(baseImage)
+			if err != nil {
+				return nil, nil, err
+			}
 			base, err := remote.Index(ref, remote.WithContext(ctx))
 			return ref, base, err
 		}),
@@ -180,10 +183,10 @@ type ServicesConfig struct {
 }
 
 type ServiceConfig struct {
-	Name string `mapstructure:"name"`
-	Main string `mapstructure:"main"`
-	// Registry string   `mapstructure:"registry"`
-	Tags []string `mapstructure:"tags"`
+	Name      string   `mapstructure:"name"`
+	Main      string   `mapstructure:"main"`
+	Tags      []string `mapstructure:"tags"`
+	BaseImage string   `mapstructure:"base_image"`
 }
 
 func (this ServiceConfig) GetTags() []string {
@@ -192,6 +195,14 @@ func (this ServiceConfig) GetTags() []string {
 	}
 
 	return viper.GetStringSlice("tags")
+}
+
+func (this ServiceConfig) GetBaseImage() string {
+	if this.BaseImage != "" {
+		return this.BaseImage
+	}
+
+	return viper.GetString("base_image")
 }
 
 func finishWithError(msg string, err error) {
@@ -206,6 +217,7 @@ func init() {
 	viper.SetConfigName(configFileName)
 	viper.SetConfigType("yaml")
 	viper.AddConfigPath(".")
+	viper.SetDefault("base_image", defaultBaseImage)
 	viper.SetEnvPrefix(configEnvPrefix)
 	viper.AutomaticEnv()
 
