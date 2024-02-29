@@ -60,11 +60,11 @@ func buildRegistryCommand(cmdName string, registry Registry, servicesConfig Serv
 	releaseCmd := &cobra.Command{
 		Use:   "release",
 		Short: "Build, tag and push an image",
-		Run: func(cmd *cobra.Command, args []string) {
+		RunE: func(cmd *cobra.Command, args []string) error {
 			authOption := getRegistryAuthOption(registry)
 			maxGoRoutines, err := cmd.Flags().GetInt("max-go-routines")
 			if err != nil {
-				finishWithError("failed getting max-go-routines flag", err)
+				return errors.Wrap(err, "failed getting max-go-routines flag")
 			}
 
 			var g errgroup.Group
@@ -87,9 +87,9 @@ func buildRegistryCommand(cmdName string, registry Registry, servicesConfig Serv
 
 			}
 			if err := g.Wait(); err != nil {
-				finishWithError("fatal error while building service", err)
+				return errors.Wrap(err, "fatal error while building service")
 			}
-
+			return nil
 		},
 	}
 	releaseCmd.Flags().Int("max-go-routines", 5, "Maximum number of go routines to use for building and pushing images concurrently. Default is 5.")
