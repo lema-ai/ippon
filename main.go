@@ -63,7 +63,7 @@ func buildRegistryCommand(cmdName string, registry Registry, servicesConfig Serv
 		Short: "Build, tag and push an image",
 		Run: func(cmd *cobra.Command, args []string) {
 			authOption := getRegistryAuthOption(registry)
-			maxGoRoutines, err := cmd.Flags().GetInt("maxgoroutines")
+			maxGoRoutines, err := cmd.PersistentFlags().GetInt("maxgoroutines")
 			if err != nil {
 				finishWithError("failed getting maxgoroutines flag", err)
 			}
