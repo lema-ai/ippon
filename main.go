@@ -18,6 +18,7 @@ import (
 	"github.com/spf13/cobra"
 	"github.com/spf13/pflag"
 	"github.com/spf13/viper"
+	"golang.org/x/sync/errgroup"
 )
 
 type Registry interface {
@@ -64,18 +65,32 @@ func buildRegistryCommand(cmdName string, registry Registry, servicesConfig Serv
 		Run: func(cmd *cobra.Command, args []string) {
 			authOption := getRegistryAuthOption(registry)
 
+			var g errgroup.Group
+			sem := make(chan struct{}, 5)
+
 			for _, service := range servicesConfig.Services {
 				service := service
-				log.Printf("ippon building service: %+v\n", service)
-				baseURL := registry.URL()
-				tags := service.GetTags()
-				baseImage := service.GetBaseImage()
+				sem <- struct{}{}
 
-				err := buildAndPublishService(ctx, service.Main, service.Name, baseURL, baseImage, tags, authOption)
-				if err != nil {
-					finishWithError("fatal error while building service", err)
-				}
+				g.Go(func() error {
+					defer func() { <-sem }()
+
+					log.Printf("ippon building service: %+v\n", service)
+					baseURL := registry.URL()
+					tags := service.GetTags()
+					baseImage := service.GetBaseImage()
+
+					err := buildAndPublishService(ctx, service.Main, service.Name, baseURL, baseImage, tags, authOption)
+					if err != nil {
+						return errors.Wrap(err, "build and push service")
+					}
+					return nil
+				})
 			}
+			if err := g.Wait(); err != nil {
+				finishWithError("fatal error while building services", err)
+			}
+			close(sem)
 		},
 	}
 
