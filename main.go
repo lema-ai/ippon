@@ -50,7 +50,7 @@ var (
 
 func buildRegistryCommand(cmdName string, registry Registry, servicesConfig ServicesConfig) (*cobra.Command, error) {
 	ctx := context.Background()
-
+	maxProcs := viper.GetInt("GO_BUILD_MAX_PROCS")
 	registryCmd := &cobra.Command{
 		Use:  cmdName,
 		Args: cobra.MinimumNArgs(1),
@@ -66,7 +66,7 @@ func buildRegistryCommand(cmdName string, registry Registry, servicesConfig Serv
 			authOption := getRegistryAuthOption(registry)
 
 			var g errgroup.Group
-			sem := make(chan struct{}, 5)
+			sem := make(chan struct{}, maxProcs)
 
 			for _, service := range servicesConfig.Services {
 				service := service
