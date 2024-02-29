@@ -256,15 +256,18 @@ func main() {
 		Use:   "ippon",
 		Short: "Ippon build and release Go images",
 		Long:  "Ippon make it easy to handle Go images release in a micro-services architecture",
+		PersistentPreRun: func(cmd *cobra.Command, args []string) {
+			verbose, err := cmd.PersistentFlags().GetBool("verbose")
+			if err != nil {
+				finishWithError("failed getting verbose flag", err)
+			}
+			if verbose {
+				log.SetOutput(os.Stdout)
+			}
+		},
 	}
+
 	rootCmd.PersistentFlags().Bool("verbose", false, "verbose output")
-	verbose, err := rootCmd.Flags().GetBool("verbose")
-	if err != nil {
-		finishWithError("failed getting verbose flag", err)
-	}
-	if !verbose {
-		log.SetOutput(&outputBuffer)
-	}
 
 	rootCmd.AddCommand(oktetoCommand, ecrCommand)
 	err = rootCmd.Execute()
