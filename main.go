@@ -257,6 +257,7 @@ func main() {
 		Short: "Ippon build and release Go images",
 		Long:  "Ippon make it easy to handle Go images release in a micro-services architecture",
 	}
+	rootCmd.PersistentFlags().Bool("verbose", false, "verbose output")
 	verbose, err := rootCmd.Flags().GetBool("verbose")
 	if err != nil {
 		finishWithError("failed getting verbose flag", err)
@@ -264,7 +265,6 @@ func main() {
 	if !verbose {
 		log.SetOutput(&outputBuffer)
 	}
-	rootCmd.PersistentFlags().Bool("verbose", false, "verbose output")
 
 	rootCmd.AddCommand(oktetoCommand, ecrCommand)
 	err = rootCmd.Execute()
