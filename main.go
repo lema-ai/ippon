@@ -232,10 +232,6 @@ func main() {
 		finishWithError("fatal error config file", err)
 	}
 
-	if !verbose {
-		log.SetOutput(&outputBuffer)
-	}
-
 	var services ServicesConfig
 	err = viper.Unmarshal(&services)
 	if err != nil {
@@ -261,8 +257,14 @@ func main() {
 		Short: "Ippon build and release Go images",
 		Long:  "Ippon make it easy to handle Go images release in a micro-services architecture",
 	}
-
-	rootCmd.Flags().Bool("verbose", false, "verbose output")
+	verbose, err := rootCmd.Flags().GetBool("verbose")
+	if err != nil {
+		finishWithError("failed getting verbose flag", err)
+	}
+	if !verbose {
+		log.SetOutput(&outputBuffer)
+	}
+	rootCmd.PersistentFlags().Bool("verbose", false, "verbose output")
 
 	rootCmd.AddCommand(oktetoCommand, ecrCommand)
 	err = rootCmd.Execute()
