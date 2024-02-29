@@ -16,7 +16,6 @@ import (
 	"github.com/lema-ai/ippon/registry"
 	"github.com/pkg/errors"
 	"github.com/spf13/cobra"
-	"github.com/spf13/pflag"
 	"github.com/spf13/viper"
 	"golang.org/x/sync/errgroup"
 )
@@ -63,9 +62,9 @@ func buildRegistryCommand(cmdName string, registry Registry, servicesConfig Serv
 		Short: "Build, tag and push an image",
 		Run: func(cmd *cobra.Command, args []string) {
 			authOption := getRegistryAuthOption(registry)
-			maxGoRoutines, err := cmd.PersistentFlags().GetInt("maxgoroutines")
+			maxGoRoutines, err := cmd.Flags().GetInt("max-go-routines")
 			if err != nil {
-				finishWithError("failed getting maxgoroutines flag", err)
+				finishWithError("failed getting max-go-routines flag", err)
 			}
 
 			var g errgroup.Group
@@ -93,7 +92,7 @@ func buildRegistryCommand(cmdName string, registry Registry, servicesConfig Serv
 
 		},
 	}
-	registryCmd.PersistentFlags().Int("maxgoroutines", 5, "Maximum number of go routines to use for building and pushing images concurrently. Default is 5.")
+	releaseCmd.Flags().Int("max-go-routines", 5, "Maximum number of go routines to use for building and pushing images concurrently. Default is 5.")
 
 	registryCmd.AddCommand(releaseCmd)
 
@@ -217,7 +216,6 @@ func finishWithError(msg string, err error) {
 }
 
 func init() {
-	pflag.BoolVar(&verbose, "verbose", false, "verbose output")
 
 	viper.SetConfigName(configFileName)
 	viper.SetConfigType("yaml")
@@ -226,7 +224,6 @@ func init() {
 	viper.SetEnvPrefix(configEnvPrefix)
 	viper.AutomaticEnv()
 
-	viper.BindPFlag("verbose", pflag.Lookup("v"))
 }
 
 func main() {
@@ -234,7 +231,6 @@ func main() {
 	if err != nil {
 		finishWithError("fatal error config file", err)
 	}
-	pflag.Parse()
 
 	if !verbose {
 		log.SetOutput(&outputBuffer)
@@ -265,6 +261,8 @@ func main() {
 		Short: "Ippon build and release Go images",
 		Long:  "Ippon make it easy to handle Go images release in a micro-services architecture",
 	}
+
+	rootCmd.Flags().Bool("verbose", false, "verbose output")
 
 	rootCmd.AddCommand(oktetoCommand, ecrCommand)
 	err = rootCmd.Execute()
