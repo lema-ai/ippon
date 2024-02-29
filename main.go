@@ -50,10 +50,6 @@ var (
 
 func buildRegistryCommand(cmdName string, registry Registry, servicesConfig ServicesConfig) (*cobra.Command, error) {
 	ctx := context.Background()
-	maxProcs := viper.GetInt("GO_BUILD_MAX_PROCS")
-	if maxProcs == 0 {
-		maxProcs = 5
-	}
 	registryCmd := &cobra.Command{
 		Use:  cmdName,
 		Args: cobra.MinimumNArgs(1),
@@ -67,9 +63,10 @@ func buildRegistryCommand(cmdName string, registry Registry, servicesConfig Serv
 		Short: "Build, tag and push an image",
 		Run: func(cmd *cobra.Command, args []string) {
 			authOption := getRegistryAuthOption(registry)
+			maxGoRoutines, _ := cmd.Flags().GetInt("max-go-routines")
 
 			var g errgroup.Group
-			g.SetLimit(maxProcs)
+			g.SetLimit(maxGoRoutines)
 			for _, service := range servicesConfig.Services {
 				service := service
 				g.Go(func() error {
@@ -93,6 +90,7 @@ func buildRegistryCommand(cmdName string, registry Registry, servicesConfig Serv
 
 		},
 	}
+	releaseCmd.Flags().Int("max-go-routines", 5, "Maximum number of go routines to use for building and pushing images concurrently. Default is 5.")
 
 	registryCmd.AddCommand(releaseCmd)
 
