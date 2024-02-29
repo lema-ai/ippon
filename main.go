@@ -51,6 +51,10 @@ var (
 func buildRegistryCommand(cmdName string, registry Registry, servicesConfig ServicesConfig) (*cobra.Command, error) {
 	ctx := context.Background()
 	maxProcs := viper.GetInt("GO_BUILD_MAX_PROCS")
+	if maxProcs == 0 {
+		return nil, errors.New("GO_BUILD_MAX_PROCS must be set")
+	}
+
 	registryCmd := &cobra.Command{
 		Use:  cmdName,
 		Args: cobra.MinimumNArgs(1),
