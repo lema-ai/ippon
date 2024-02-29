@@ -261,7 +261,7 @@ func main() {
 			if err != nil {
 				return errors.Wrap(err, "failed getting verbose flag")
 			}
-			if verbose {
+			if !verbose {
 				log.SetOutput(os.Stdout)
 			}
 			return nil
