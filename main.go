@@ -16,7 +16,6 @@ import (
 	"github.com/lema-ai/ippon/registry"
 	"github.com/pkg/errors"
 	"github.com/spf13/cobra"
-	"github.com/spf13/pflag"
 	"github.com/spf13/viper"
 	"golang.org/x/sync/errgroup"
 )
@@ -50,7 +49,6 @@ var (
 
 func buildRegistryCommand(cmdName string, registry Registry, servicesConfig ServicesConfig) (*cobra.Command, error) {
 	ctx := context.Background()
-
 	registryCmd := &cobra.Command{
 		Use:  cmdName,
 		Args: cobra.MinimumNArgs(1),
@@ -62,10 +60,15 @@ func buildRegistryCommand(cmdName string, registry Registry, servicesConfig Serv
 	releaseCmd := &cobra.Command{
 		Use:   "release",
 		Short: "Build, tag and push an image",
-		Run: func(cmd *cobra.Command, args []string) {
+		RunE: func(cmd *cobra.Command, args []string) error {
 			authOption := getRegistryAuthOption(registry)
+			maxGoRoutines, err := cmd.Flags().GetInt("max-go-routines")
+			if err != nil {
+				return errors.Wrap(err, "failed getting max-go-routines flag")
+			}
 
 			var g errgroup.Group
+			g.SetLimit(maxGoRoutines)
 			for _, service := range servicesConfig.Services {
 				service := service
 				g.Go(func() error {
@@ -84,11 +87,12 @@ func buildRegistryCommand(cmdName string, registry Registry, servicesConfig Serv
 
 			}
 			if err := g.Wait(); err != nil {
-				finishWithError("fatal error while building service", err)
+				return errors.Wrap(err, "fatal error while building service")
 			}
-
+			return nil
 		},
 	}
+	releaseCmd.Flags().Int("max-go-routines", 5, "Maximum number of go routines to use for building and pushing images concurrently. Default is 5.")
 
 	registryCmd.AddCommand(releaseCmd)
 
@@ -212,7 +216,6 @@ func finishWithError(msg string, err error) {
 }
 
 func init() {
-	pflag.BoolVar(&verbose, "verbose", false, "verbose output")
 
 	viper.SetConfigName(configFileName)
 	viper.SetConfigType("yaml")
@@ -221,18 +224,12 @@ func init() {
 	viper.SetEnvPrefix(configEnvPrefix)
 	viper.AutomaticEnv()
 
-	viper.BindPFlag("verbose", pflag.Lookup("v"))
 }
 
 func main() {
 	err := viper.ReadInConfig()
 	if err != nil {
 		finishWithError("fatal error config file", err)
-	}
-	pflag.Parse()
-
-	if !verbose {
-		log.SetOutput(&outputBuffer)
 	}
 
 	var services ServicesConfig
@@ -259,7 +256,19 @@ func main() {
 		Use:   "ippon",
 		Short: "Ippon build and release Go images",
 		Long:  "Ippon make it easy to handle Go images release in a micro-services architecture",
+		PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
+			verbose, err := cmd.PersistentFlags().GetBool("verbose")
+			if err != nil {
+				return errors.Wrap(err, "failed getting verbose flag")
+			}
+			if verbose {
+				log.SetOutput(os.Stdout)
+			}
+			return nil
+		},
 	}
+
+	rootCmd.PersistentFlags().Bool("verbose", false, "verbose output")
 
 	rootCmd.AddCommand(oktetoCommand, ecrCommand)
 	err = rootCmd.Execute()
