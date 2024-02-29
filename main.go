@@ -93,7 +93,7 @@ func buildRegistryCommand(cmdName string, registry Registry, servicesConfig Serv
 
 		},
 	}
-	registryCmd.Flags().Int("maxgoroutines", 5, "Maximum number of go routines to use for building and pushing images concurrently. Default is 5.")
+	registryCmd.PersistentFlags().Int("maxgoroutines", 5, "Maximum number of go routines to use for building and pushing images concurrently. Default is 5.")
 
 	registryCmd.AddCommand(releaseCmd)
 
