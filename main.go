@@ -48,25 +48,12 @@ var (
 	outputBuffer bytes.Buffer // easier debugging in case of errors, buffer to store output when running in non verbose mode
 )
 
-// func callPersistentPreRun(cmd *cobra.Command, args []string) error {
-// 	if parent := cmd.Parent(); parent != nil {
-// 		if parent.PersistentPreRunE != nil {
-// 			return parent.PersistentPreRunE(parent, args)
-// 		}
-// 	}
-// 	return nil
-// }
-
 func buildRegistryCommand(cmdName string, registry Registry, servicesConfig ServicesConfig) (*cobra.Command, error) {
 	ctx := context.Background()
 	registryCmd := &cobra.Command{
 		Use:  cmdName,
 		Args: cobra.MinimumNArgs(1),
 		PreRunE: func(cmd *cobra.Command, args []string) error {
-			// err := callPersistentPreRun(cmd, args)
-			// if err != nil {
-			// 	return errors.Wrap(err, "failed calling persistent pre run e on parent command")
-			// }
 			return registry.Init(ctx)
 		},
 	}
