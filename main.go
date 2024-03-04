@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"io"
 	"log"
 	"os"
 	"strings"
@@ -47,12 +48,24 @@ var (
 	outputBuffer bytes.Buffer // easier debugging in case of errors, buffer to store output when running in non verbose mode
 )
 
+func tryCallParentPersistentPreRun(cmd *cobra.Command, args []string) error {
+	if parent := cmd.Parent(); parent != nil {
+		if parent.PersistentPreRunE != nil {
+			return parent.PersistentPreRunE(parent, args)
+		}
+	}
+	return nil
+}
 func buildRegistryCommand(cmdName string, registry Registry, servicesConfig ServicesConfig) (*cobra.Command, error) {
 	ctx := context.Background()
 	registryCmd := &cobra.Command{
 		Use:  cmdName,
 		Args: cobra.MinimumNArgs(1),
 		PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
+			err := tryCallParentPersistentPreRun(cmd, args)
+			if err != nil {
+				return errors.Wrap(err, "failed calling persistent pre run e on parent command")
+			}
 			return registry.Init(ctx)
 		},
 	}
@@ -257,12 +270,14 @@ func main() {
 		Short: "Ippon build and release Go images",
 		Long:  "Ippon make it easy to handle Go images release in a micro-services architecture",
 		PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
-			verbose, err := cmd.PersistentFlags().GetBool("verbose")
+			verbose, err := cmd.Flags().GetBool("verbose")
 			if err != nil {
 				return errors.Wrap(err, "failed getting verbose flag")
 			}
-			if !verbose {
+			if verbose {
 				log.SetOutput(os.Stdout)
+			} else {
+				log.SetOutput(io.Discard)
 			}
 			return nil
 		},
