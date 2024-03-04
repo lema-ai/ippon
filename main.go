@@ -48,7 +48,7 @@ var (
 	outputBuffer bytes.Buffer // easier debugging in case of errors, buffer to store output when running in non verbose mode
 )
 
-func callPersistentPreRun(cmd *cobra.Command, args []string) error {
+func tryCallParentPersistentPreRun(cmd *cobra.Command, args []string) error {
 	if parent := cmd.Parent(); parent != nil {
 		if parent.PersistentPreRunE != nil {
 			return parent.PersistentPreRunE(parent, args)
@@ -62,7 +62,7 @@ func buildRegistryCommand(cmdName string, registry Registry, servicesConfig Serv
 		Use:  cmdName,
 		Args: cobra.MinimumNArgs(1),
 		PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
-			err := callPersistentPreRun(cmd, args)
+			err := tryCallParentPersistentPreRun(cmd, args)
 			if err != nil {
 				return errors.Wrap(err, "failed calling persistent pre run e on parent command")
 			}
