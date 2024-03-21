@@ -1,23 +1,21 @@
-package registry
+package okteto
 
 import (
 	"context"
 	"fmt"
 	"os"
 
-	"github.com/google/go-containerregistry/pkg/authn"
-	"github.com/google/ko/pkg/publish"
 	"github.com/pkg/errors"
 )
 
-type Okteto struct {
+type Registry struct {
 	registryUrl string
 	namespace   string
 	username    string
 	token       string
 }
 
-func (this *Okteto) Init(ctx context.Context) error {
+func (this *Registry) Init(ctx context.Context) error {
 	registryUrl, exists := os.LookupEnv("OKTETO_REGISTRY_URL")
 	if !exists {
 		return errors.New("Failed getting Okteto's registry: OKTETO_REGISTRY_URL not set")
@@ -45,13 +43,20 @@ func (this *Okteto) Init(ctx context.Context) error {
 	return nil
 }
 
-func (this *Okteto) GetAuthOption() publish.Option {
-	return publish.WithAuth(&authn.Basic{
-		Username: this.username,
-		Password: this.token,
-	})
+func (this *Registry) Username() string {
+	return this.username
 }
 
-func (this *Okteto) URL() string {
+func (this *Registry) Password() string {
+	return this.token
+}
+
+//	func (this *Registry) GetAuthOption() publish.Option {
+//		return publish.WithAuth(&authn.Basic{
+//			Username: this.username,
+//			Password: this.token,
+//		})
+//	}
+func (this *Registry) URL() string {
 	return fmt.Sprintf("%s/%s", this.registryUrl, this.namespace)
 }
