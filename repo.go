@@ -26,8 +26,7 @@ func authDockerEcr(accountId, region string) error {
 	dockerLoginArgs := []string{"login", "--username", "AWS", "--password-stdin", fmt.Sprintf("%s.dkr.ecr.%s.amazonaws.com", accountId, region)}
 	awsAuthCmd := exec.Command("aws", awsAuthArgs...)
 	dockerLoginCmd := exec.Command("docker", dockerLoginArgs...)
-	fmt.Println(awsAuthArgs)
-	fmt.Println(dockerLoginArgs)
+
 	var err error
 	dockerLoginCmd.Stdin, err = awsAuthCmd.StdoutPipe()
 	if err != nil {
@@ -49,7 +48,7 @@ func authDockerEcr(accountId, region string) error {
 }
 
 func buildDockerImage(repoName, dockerfilePath, target string, tags []string) error {
-	buildArgs := []string{"buildx", "build", "--platform=linux/amd64", "--progress=plain"}
+	buildArgs := []string{"buildx", "build", "--platform=linux/amd64", "--progress=plain", "--push"}
 	if target != "" {
 		buildArgs = append(buildArgs, "--target", target)
 	}
@@ -57,7 +56,6 @@ func buildDockerImage(repoName, dockerfilePath, target string, tags []string) er
 		buildArgs = append(buildArgs, "-t", fmt.Sprintf("%s:%s", repoName, tag))
 	}
 	buildArgs = append(buildArgs, "-f", dockerfilePath, ".")
-	fmt.Println(buildArgs)
 
 	buildCmd := exec.Command("docker", buildArgs...)
 	buildCmd.Env = append(os.Environ(), "DOCKER_BUILDKIT=1")
@@ -91,25 +89,12 @@ func getDockerImageDigest(repoName, tag string) (string, error) {
 	return manifest.Descriptor.Digest, nil
 }
 
-func pushDockerImage(repoName, tag string) error {
-	pushArgs := []string{"push", fmt.Sprintf("%s:%s", repoName, tag)}
-	pushCmd := exec.Command("docker", pushArgs...)
-	pushCmd.Stdout = os.Stdout
-	pushCmd.Stderr = os.Stderr
-	return pushCmd.Run()
-}
-
 func buildAndPublishDockerService(ecr *registry.ECR, serviceName, dockerfilePath, target, namespace string, tags []string) (*Image, error) {
 	repoName := ecr.GetRepositoryURL(fmt.Sprintf("%s/%s", namespace, serviceName))
 
 	err := buildDockerImage(repoName, dockerfilePath, target, tags)
 	if err != nil {
 		return nil, errors.Wrap(err, "build docker image")
-	}
-
-	err = pushDockerImage(repoName, tags[0])
-	if err != nil {
-		return nil, errors.Wrap(err, "push docker image")
 	}
 
 	digest, err := getDockerImageDigest(repoName, tags[0])
@@ -193,6 +178,31 @@ func registryCommand(ctx context.Context, cmd *cobra.Command, _ []string, servic
 	imagesChan := make(chan *Image, len(servicesConfig.GoServices)+lenDockerServices)
 	g := errgroup.Group{}
 	g.SetLimit(maxGoRoutines)
+
+	err = authDockerEcr(registry.AccountId(), registry.Region())
+	if err != nil {
+		return errors.Wrap(err, "auth docker ecr")
+	}
+
+	for _, service := range servicesConfig.DockerServices {
+		service := service
+
+		log.Printf("ippon building docker service: %+v\n", service)
+		tags := service.GetTags()
+		for _, target := range service.TargetsOrder {
+			target := target
+			g.Go(func() error {
+				image, err := buildAndPublishDockerService(registry, target.Name, service.Dockerfile, target.Target, namespace, tags)
+				if err != nil {
+					return errors.Wrap(err, "build and push docker service")
+				}
+
+				imagesChan <- image
+				return nil
+			})
+		}
+	}
+
 	for _, service := range servicesConfig.GoServices {
 		service := service
 		g.Go(func() error {
@@ -211,38 +221,14 @@ func registryCommand(ctx context.Context, cmd *cobra.Command, _ []string, servic
 		})
 	}
 
-	err = authDockerEcr(registry.AccountId(), registry.Region())
-	if err != nil {
-		return errors.Wrap(err, "auth docker ecr")
-	}
-
-	for _, service := range servicesConfig.DockerServices {
-		service := service
-		g.Go(func() error {
-			log.Printf("ippon building docker service: %+v\n", service)
-			tags := service.GetTags()
-			for _, target := range service.TargetsOrder {
-				image, err := buildAndPublishDockerService(registry, target.Name, service.Dockerfile, target.Target, namespace, tags)
-				if err != nil {
-					return errors.Wrap(err, "build and push docker service")
-				}
-
-				imagesChan <- image
-			}
-			return nil
-		})
-	}
-
 	if err := g.Wait(); err != nil {
 		return errors.Wrap(err, "fatal error while building service")
 	}
-
 	close(imagesChan)
 
 	if namespace == "" {
 		return nil
 	}
-
 	return updateK8sDeployment(namespace, imagesChan)
 }
 
