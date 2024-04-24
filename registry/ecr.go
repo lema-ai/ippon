@@ -32,6 +32,14 @@ func (this *ECR) Init(ctx context.Context) error {
 	return nil
 }
 
+func (this *ECR) AccountId() string {
+	return this.accountId
+}
+
+func (this *ECR) Region() string {
+	return this.region
+}
+
 func (this *ECR) URL() string {
 	return fmt.Sprintf("%s.dkr.ecr.%s.amazonaws.com", this.accountId, this.region)
 }

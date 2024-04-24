@@ -2,73 +2,74 @@ package main
 
 import (
 	"os"
+	"path"
 
 	"github.com/samber/lo"
 	"gopkg.in/yaml.v2"
-	"sigs.k8s.io/kustomize/api/types"
 )
 
-const (
-	k8sKustomizeFile = "k8s/overlays/okteto-dev/images.yaml"
-)
-
-type k8sRenameInfo struct {
-	name   string
-	image  string
-	digest string
+type Images struct {
+	Images []*Image `yaml:"images"`
 }
 
-func getKustomiztion() (*types.Kustomization, error) {
-	data, err := os.ReadFile(k8sKustomizeFile)
+type Image struct {
+	OldName string `yaml:"old_image"`
+	NewName string `yaml:"new_image"`
+}
+
+func getKustomiztion(path string) (*Images, error) {
+	data, err := os.ReadFile(path)
 	if os.IsNotExist(err) {
-		return &types.Kustomization{}, nil
+		return nil, nil
 	}
 	if err != nil {
 		return nil, err
 	}
 
-	var k types.Kustomization
-	if err := k.Unmarshal(data); err != nil {
+	var i Images
+	err = yaml.Unmarshal(data, &i)
+	if err != nil {
 		return nil, err
 	}
 
-	return &k, nil
+	return &i, nil
 }
 
-func updateK8sDeployment(k8sInfoChan chan *k8sRenameInfo) error {
-	infos := map[string]*k8sRenameInfo{}
-	for info := range k8sInfoChan {
-		infos[info.name] = info
+func updateK8sDeployment(namespace string, imagesChan chan *Image) error {
+	builtImages := []*Image{}
+	for image := range imagesChan {
+		builtImages = append(builtImages, image)
 	}
 
-	k, err := getKustomiztion()
+	filePath := path.Join(".ippon", namespace+".yaml")
+	images, err := getKustomiztion(filePath)
 	if err != nil {
 		return err
 	}
 
-	for service, info := range infos {
-		fullName := "registry.lema.ai/" + service
+	currentImages := []*Image{}
+	if images != nil && images.Images != nil {
+		currentImages = images.Images
+	}
 
-		_, idx, ok := lo.FindIndexOf(k.Images, func(i types.Image) bool {
-			return i.Name == fullName
+	for _, image := range builtImages {
+		_, idx, ok := lo.FindIndexOf(currentImages, func(i *Image) bool {
+			return i.OldName == image.OldName
 		})
 
 		if !ok {
-			k.Images = append(k.Images, types.Image{
-				Name:    fullName,
-				NewName: info.image,
-				Digest:  info.digest,
-			})
+			currentImages = append(currentImages, image)
 		} else {
-			k.Images[idx].NewName = info.image
-			k.Images[idx].Digest = info.digest
+			currentImages[idx].NewName = image.NewName
 		}
 	}
 
-	out, err := yaml.Marshal(k)
+	images = &Images{Images: currentImages}
+
+	out, err := yaml.Marshal(images)
 	if err != nil {
 		return err
 	}
 
-	return os.WriteFile(k8sKustomizeFile, out, 0644)
+	return os.WriteFile(filePath, out, 0644)
 }
