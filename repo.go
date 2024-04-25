@@ -47,8 +47,10 @@ func authDockerEcr(accountId, region string) error {
 	return dockerLoginCmd.Wait()
 }
 
-func buildDockerImage(repoName, dockerfilePath, target string, tags []string) error {
-	buildArgs := []string{"buildx", "build", "--platform=linux/amd64", "--progress=plain", "--push"}
+func buildDockerImage(repoURL, repoName, dockerfilePath, target string, tags []string) error {
+	buildArgs := []string{"buildx", "build", "--output", "type=registry", "--platform=linux/amd64", "--progress=plain", "--push", "--build-arg", "BUILDKIT_INLINE_CACHE=1",
+		"--cache-to", fmt.Sprintf("mode=max,image-manifest=true,oci-mediatypes=true,type=registry,ref=%s/cache/%s:cache", repoURL, target),
+		"--cache-from", fmt.Sprintf("mode=max,image-manifest=true,oci-mediatypes=true,type=registry,ref=%s/cache/%s:cache", repoURL, target)}
 	if target != "" {
 		buildArgs = append(buildArgs, "--target", target)
 	}
@@ -90,9 +92,10 @@ func getDockerImageDigest(repoName, tag string) (string, error) {
 }
 
 func buildAndPublishDockerService(ecr *registry.ECR, serviceName, dockerfilePath, target, namespace string, tags []string) (*Image, error) {
+	repoURL := ecr.URL()
 	repoName := ecr.GetRepositoryURL(fmt.Sprintf("%s/%s", namespace, serviceName))
 
-	err := buildDockerImage(repoName, dockerfilePath, target, tags)
+	err := buildDockerImage(repoURL, repoName, dockerfilePath, target, tags)
 	if err != nil {
 		return nil, errors.Wrap(err, "build docker image")
 	}
@@ -189,18 +192,19 @@ func registryCommand(ctx context.Context, cmd *cobra.Command, _ []string, servic
 
 		log.Printf("ippon building docker service: %+v\n", service)
 		tags := service.GetTags()
-		for _, target := range service.TargetsOrder {
-			target := target
-			g.Go(func() error {
+		g.Go(func() error {
+			for _, target := range service.TargetsOrder {
+				target := target
+
 				image, err := buildAndPublishDockerService(registry, target.Name, service.Dockerfile, target.Target, namespace, tags)
 				if err != nil {
 					return errors.Wrap(err, "build and push docker service")
 				}
 
 				imagesChan <- image
-				return nil
-			})
-		}
+			}
+			return nil
+		})
 	}
 
 	for _, service := range servicesConfig.GoServices {
