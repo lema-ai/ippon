@@ -34,6 +34,7 @@ func authDockerEcr(accountId, region string) error {
 	}
 
 	dockerLoginCmd.Stdout = os.Stdout
+	dockerLoginCmd.Stderr = os.Stderr
 	err = dockerLoginCmd.Start()
 	if err != nil {
 		return errors.Wrap(err, "Failed starting docker login command")
@@ -47,10 +48,12 @@ func authDockerEcr(accountId, region string) error {
 	return dockerLoginCmd.Wait()
 }
 
-func buildDockerImage(repoURL, repoName, dockerfilePath, target string, tags []string) error {
+func buildDockerImage(repoURL, repoName, dockerfilePath, target, cacheToTarget string, cacheFromTargets, tags []string) error {
 	buildArgs := []string{"buildx", "build", "--output", "type=registry", "--platform=linux/amd64", "--progress=plain", "--push", "--build-arg", "BUILDKIT_INLINE_CACHE=1",
-		"--cache-to", fmt.Sprintf("mode=max,image-manifest=true,oci-mediatypes=true,type=registry,ref=%s/cache/%s:cache", repoURL, target),
-		"--cache-from", fmt.Sprintf("mode=max,image-manifest=true,oci-mediatypes=true,type=registry,ref=%s/cache/%s:cache", repoURL, target)}
+		"--cache-to", fmt.Sprintf("mode=max,image-manifest=true,oci-mediatypes=true,type=registry,ref=%s/cache/%s:cache", repoURL, cacheToTarget)}
+	for _, cacheFromTarget := range cacheFromTargets {
+		buildArgs = append(buildArgs, "--cache-from", fmt.Sprintf("mode=max,image-manifest=true,oci-mediatypes=true,type=registry,ref=%s/cache/%s:cache", repoURL, cacheFromTarget))
+	}
 	if target != "" {
 		buildArgs = append(buildArgs, "--target", target)
 	}
@@ -82,20 +85,24 @@ func getDockerImageDigest(repoName, tag string) (string, error) {
 		return "", errors.Wrap(err, "get docker image digest")
 	}
 
-	var manifest dockerManifest
-	err = json.Unmarshal(digestBytes, &manifest)
-	if err != nil {
+	var manifests []dockerManifest
+	err = json.Unmarshal(digestBytes, &manifests)
+	if err != nil || len(manifests) == 0 {
+		fmt.Println(string(digestBytes))
 		return "", errors.Wrap(err, "unmarshal docker manifest")
 	}
 
-	return manifest.Descriptor.Digest, nil
+	return manifests[0].Descriptor.Digest, nil
 }
 
-func buildAndPublishDockerService(ecr *registry.ECR, serviceName, dockerfilePath, target, namespace string, tags []string) (*Image, error) {
+func buildAndPublishDockerService(ecr *registry.ECR, serviceName, dockerfilePath, target, namespace string, allTargets, tags []string) (*Image, error) {
 	repoURL := ecr.URL()
 	repoName := ecr.GetRepositoryURL(fmt.Sprintf("%s/%s", namespace, serviceName))
+	cacheTargets := lo.Map(allTargets, func(t string, _ int) string {
+		return fmt.Sprintf("%s/%s", namespace, t)
+	})
 
-	err := buildDockerImage(repoURL, repoName, dockerfilePath, target, tags)
+	err := buildDockerImage(repoURL, repoName, dockerfilePath, target, serviceName, cacheTargets, tags)
 	if err != nil {
 		return nil, errors.Wrap(err, "build docker image")
 	}
@@ -163,7 +170,17 @@ func buildAndPublishGoService(ctx context.Context, cmdDir, serviceName, baseURL,
 	}, nil
 }
 
-func registryCommand(ctx context.Context, cmd *cobra.Command, _ []string, servicesConfig *ServicesConfig, registry *registry.ECR) error {
+func registryCommand(ctx context.Context, cmd *cobra.Command, _ []string, registryName string) error {
+	configPath, err := cmd.Flags().GetString("config")
+	if err != nil {
+		return errors.Wrap(err, "failed getting config flag")
+	}
+
+	config, err := getConfig(registryName, configPath)
+	if err != nil {
+		return errors.Wrap(err, "get services config")
+	}
+
 	authOption := publish.WithAuthFromKeychain(authn.DefaultKeychain)
 	maxGoRoutines, err := cmd.Flags().GetInt("max-go-routines")
 	if err != nil {
@@ -175,28 +192,30 @@ func registryCommand(ctx context.Context, cmd *cobra.Command, _ []string, servic
 		return errors.Wrap(err, "failed getting namespace flag")
 	}
 
-	lenDockerServices := lo.Sum(lo.Map(servicesConfig.DockerServices, func(s DockerServiceConfig, _ int) int {
+	lenDockerServices := lo.Sum(lo.Map(config.ServicesConfig.DockerServices, func(s DockerServiceConfig, _ int) int {
 		return len(s.TargetsOrder)
 	}))
-	imagesChan := make(chan *Image, len(servicesConfig.GoServices)+lenDockerServices)
+	imagesChan := make(chan *Image, len(config.ServicesConfig.GoServices)+lenDockerServices)
 	g := errgroup.Group{}
 	g.SetLimit(maxGoRoutines)
 
-	err = authDockerEcr(registry.AccountId(), registry.Region())
+	err = authDockerEcr(config.ECR.AccountId(), config.ECR.Region())
 	if err != nil {
 		return errors.Wrap(err, "auth docker ecr")
 	}
 
-	for _, service := range servicesConfig.DockerServices {
+	for _, service := range config.ServicesConfig.DockerServices {
 		service := service
 
 		log.Printf("ippon building docker service: %+v\n", service)
 		tags := service.GetTags()
+		targets := lo.Map(service.TargetsOrder, func(t Target, _ int) string {
+			return t.Name
+		})
 		g.Go(func() error {
 			for _, target := range service.TargetsOrder {
 				target := target
-
-				image, err := buildAndPublishDockerService(registry, target.Name, service.Dockerfile, target.Target, namespace, tags)
+				image, err := buildAndPublishDockerService(config.ECR, target.Name, service.Dockerfile, target.Target, namespace, targets, tags)
 				if err != nil {
 					return errors.Wrap(err, "build and push docker service")
 				}
@@ -207,11 +226,11 @@ func registryCommand(ctx context.Context, cmd *cobra.Command, _ []string, servic
 		})
 	}
 
-	for _, service := range servicesConfig.GoServices {
+	for _, service := range config.ServicesConfig.GoServices {
 		service := service
 		g.Go(func() error {
 			log.Printf("ippon building go service: %+v\n", service)
-			baseURL := registry.URL()
+			baseURL := config.ECR.URL()
 			tags := service.GetTags()
 			baseImage := service.GetBaseImage()
 
@@ -236,41 +255,49 @@ func registryCommand(ctx context.Context, cmd *cobra.Command, _ []string, servic
 	return updateK8sDeployment(namespace, imagesChan)
 }
 
-func createMissingReposCommand(ctx context.Context, cmd *cobra.Command, _ []string, servicesConfig *ServicesConfig, registry *registry.ECR) error {
-	{
-		namespace, err := cmd.Flags().GetString("namespace")
-		if err != nil {
-			return errors.Wrap(err, "failed getting namespace flag")
+func createMissingReposCommand(ctx context.Context, cmd *cobra.Command, _ []string, registryName string) error {
+	configPath, err := cmd.Flags().GetString("config")
+	if err != nil {
+		return errors.Wrap(err, "failed getting config flag")
+	}
+	config, err := getConfig(registryName, configPath)
+	if err != nil {
+		return errors.Wrap(err, "get services config")
+	}
+
+	namespace, err := cmd.Flags().GetString("namespace")
+	if err != nil {
+		return errors.Wrap(err, "failed getting namespace flag")
+	}
+	if namespace == "" {
+		return errors.New("empty namespace flag is not supported for create-missing-repos command")
+	}
+
+	serviceNames := lo.Map(config.ServicesConfig.GoServices, func(s GoServiceConfig, _ int) string {
+		return s.Name
+	})
+	for _, service := range config.ServicesConfig.DockerServices {
+		serviceNames = append(serviceNames, lo.Map(service.TargetsOrder, func(t Target, _ int) string {
+			return t.Name
+		})...)
+	}
+
+	for _, repo := range serviceNames {
+		if namespace != "" {
+			repo = path.Join(namespace, repo)
 		}
-		if namespace == "" {
-			return errors.New("empty namespace flag is not supported for create-missing-repos command")
+		exists, err := config.ECR.RepositoryExists(ctx, repo)
+		if err != nil {
+			return err
 		}
 
-		serviceNames := lo.Map(servicesConfig.GoServices, func(s GoServiceConfig, _ int) string {
-			return s.Name
-		})
-		for _, service := range servicesConfig.DockerServices {
-			serviceNames = append(serviceNames, lo.Map(service.TargetsOrder, func(t Target, _ int) string {
-				return t.Name
-			})...)
-		}
-		for _, repo := range serviceNames {
-			if namespace != "" {
-				repo = path.Join(namespace, repo)
-			}
-			exists, err := registry.RepositoryExists(ctx, repo)
+		if !exists {
+			err := config.ECR.CreateRepository(ctx, repo)
 			if err != nil {
 				return err
 			}
-
-			if !exists {
-				err := registry.CreateRepository(ctx, repo)
-				if err != nil {
-					return err
-				}
-				log.Printf("repository created in registry: %s\n", repo)
-			}
+			log.Printf("repository created in registry: %s\n", repo)
 		}
-		return nil
 	}
+	return nil
 }

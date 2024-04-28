@@ -16,20 +16,17 @@ type ECR struct {
 	client    *ecr.Client
 }
 
-func NewECR(accountId, region string) *ECR {
+func NewECR(ctx context.Context, accountId, region string) (*ECR, error) {
+	cfg, err := config.LoadDefaultConfig(ctx, config.WithRegion(region))
+	if err != nil {
+		return nil, err
+	}
+
 	return &ECR{
 		accountId: accountId,
 		region:    region,
-	}
-}
-
-func (this *ECR) Init(ctx context.Context) error {
-	cfg, err := config.LoadDefaultConfig(ctx, config.WithRegion(this.region))
-	if err != nil {
-		return err
-	}
-	this.client = ecr.NewFromConfig(cfg)
-	return nil
+		client:    ecr.NewFromConfig(cfg),
+	}, nil
 }
 
 func (this *ECR) AccountId() string {
