@@ -107,7 +107,7 @@ func main() {
 		finishWithError("failed creating okteto command", err)
 	}
 
-	releaseCommand, err := buildRegistryCommand("release")
+	releaseCommand, err := buildRegistryCommand("prod")
 	if err != nil {
 		finishWithError("failed creating release command", err)
 	}

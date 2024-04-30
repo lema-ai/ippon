@@ -99,7 +99,7 @@ func buildAndPublishDockerService(ecr *registry.ECR, serviceName, dockerfilePath
 	repoURL := ecr.URL()
 	repoName := ecr.GetRepositoryURL(fmt.Sprintf("%s/%s", namespace, serviceName))
 	cacheTargets := lo.Map(allTargets, func(t string, _ int) string {
-		return fmt.Sprintf("%s/%s", namespace, t)
+		return t
 	})
 
 	err := buildDockerImage(repoURL, repoName, dockerfilePath, target, serviceName, cacheTargets, tags)
