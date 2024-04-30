@@ -272,9 +272,6 @@ func createMissingReposCommand(ctx context.Context, cmd *cobra.Command, _ []stri
 	if err != nil {
 		return errors.Wrap(err, "failed getting namespace flag")
 	}
-	if namespace == "" {
-		return errors.New("empty namespace flag is not supported for create-missing-repos command")
-	}
 
 	serviceNames := lo.Map(config.ServicesConfig.GoServices, func(s GoServiceConfig, _ int) string {
 		return s.Name
