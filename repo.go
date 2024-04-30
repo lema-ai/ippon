@@ -48,11 +48,14 @@ func authDockerEcr(accountId, region string) error {
 	return dockerLoginCmd.Wait()
 }
 
-func buildDockerImage(repoURL, repoName, dockerfilePath, target, cacheToTarget string, cacheFromTargets, tags []string) error {
-	buildArgs := []string{"buildx", "build", "--output", "type=registry", "--platform=linux/amd64", "--progress=plain", "--push", "--build-arg", "BUILDKIT_INLINE_CACHE=1",
+func buildDockerImage(repoURL, repoName, dockerfilePath, target, cacheToTarget string, cacheFromTargets, tags []string, remoteBuild bool) error {
+	buildArgs := []string{"--context", "ec2-builder", "buildx", "build", "--output", "type=registry", "--platform=linux/amd64", "--progress=plain", "--push", "--build-arg", "BUILDKIT_INLINE_CACHE=1",
 		"--cache-to", fmt.Sprintf("mode=max,image-manifest=true,oci-mediatypes=true,type=registry,ref=%s/cache/%s:cache", repoURL, cacheToTarget)}
 	for _, cacheFromTarget := range cacheFromTargets {
 		buildArgs = append(buildArgs, "--cache-from", fmt.Sprintf("mode=max,image-manifest=true,oci-mediatypes=true,type=registry,ref=%s/cache/%s:cache", repoURL, cacheFromTarget))
+	}
+	if remoteBuild {
+		buildArgs = append([]string{"--context", "ec2-builder"}, buildArgs...)
 	}
 	if target != "" {
 		buildArgs = append(buildArgs, "--target", target)
@@ -95,14 +98,14 @@ func getDockerImageDigest(repoName, tag string) (string, error) {
 	return manifests[0].Descriptor.Digest, nil
 }
 
-func buildAndPublishDockerService(ecr *registry.ECR, serviceName, dockerfilePath, target, namespace string, allTargets, tags []string) (*Image, error) {
+func buildAndPublishDockerService(ecr *registry.ECR, serviceName, dockerfilePath, target, namespace string, allTargets, tags []string, remoteBuild bool) (*Image, error) {
 	repoURL := ecr.URL()
 	repoName := ecr.GetRepositoryURL(fmt.Sprintf("%s/%s", namespace, serviceName))
 	cacheTargets := lo.Map(allTargets, func(t string, _ int) string {
 		return t
 	})
 
-	err := buildDockerImage(repoURL, repoName, dockerfilePath, target, serviceName, cacheTargets, tags)
+	err := buildDockerImage(repoURL, repoName, dockerfilePath, target, serviceName, cacheTargets, tags, remoteBuild)
 	if err != nil {
 		return nil, errors.Wrap(err, "build docker image")
 	}
@@ -170,7 +173,7 @@ func buildAndPublishGoService(ctx context.Context, cmdDir, serviceName, baseURL,
 	}, nil
 }
 
-func registryCommand(ctx context.Context, cmd *cobra.Command, _ []string, registryName string) error {
+func registryCommand(ctx context.Context, cmd *cobra.Command, _ []string, registryName string, remoteBuild bool) error {
 	configPath, err := cmd.Flags().GetString("config")
 	if err != nil {
 		return errors.Wrap(err, "failed getting config flag")
@@ -215,7 +218,7 @@ func registryCommand(ctx context.Context, cmd *cobra.Command, _ []string, regist
 		g.Go(func() error {
 			for _, target := range service.TargetsOrder {
 				target := target
-				image, err := buildAndPublishDockerService(config.ECR, target.Name, service.Dockerfile, target.Target, namespace, targets, tags)
+				image, err := buildAndPublishDockerService(config.ECR, target.Name, service.Dockerfile, target.Target, namespace, targets, tags, remoteBuild)
 				if err != nil {
 					return errors.Wrap(err, "build and push docker service")
 				}
