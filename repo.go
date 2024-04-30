@@ -49,7 +49,7 @@ func authDockerEcr(accountId, region string) error {
 }
 
 func buildDockerImage(repoURL, repoName, dockerfilePath, target, cacheToTarget string, cacheFromTargets, tags []string, remoteBuild bool) error {
-	buildArgs := []string{"--context", "ec2-builder", "buildx", "build", "--output", "type=registry", "--platform=linux/amd64", "--progress=plain", "--push", "--build-arg", "BUILDKIT_INLINE_CACHE=1",
+	buildArgs := []string{"buildx", "build", "--output", "type=registry", "--platform=linux/amd64", "--progress=plain", "--push", "--build-arg", "BUILDKIT_INLINE_CACHE=1",
 		"--cache-to", fmt.Sprintf("mode=max,image-manifest=true,oci-mediatypes=true,type=registry,ref=%s/cache/%s:cache", repoURL, cacheToTarget)}
 	for _, cacheFromTarget := range cacheFromTargets {
 		buildArgs = append(buildArgs, "--cache-from", fmt.Sprintf("mode=max,image-manifest=true,oci-mediatypes=true,type=registry,ref=%s/cache/%s:cache", repoURL, cacheFromTarget))
