@@ -100,7 +100,10 @@ func getDockerImageDigest(repoName, tag string) (string, error) {
 
 func buildAndPublishDockerService(ecr *registry.ECR, serviceName, dockerfilePath, target, namespace string, allTargets, tags []string, remoteBuild bool) (*Image, error) {
 	repoURL := ecr.URL()
-	repoName := ecr.GetRepositoryURL(fmt.Sprintf("%s/%s", namespace, serviceName))
+	repoName := ecr.GetRepositoryURL(serviceName)
+	if namespace != "" {
+		repoName = ecr.GetRepositoryURL(fmt.Sprintf("%s/%s", namespace, serviceName))
+	}
 	cacheTargets := lo.Map(allTargets, func(t string, _ int) string {
 		return t
 	})
