@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"path"
+	"strings"
 
 	"github.com/google/go-containerregistry/pkg/authn"
 	"github.com/google/go-containerregistry/pkg/name"
@@ -115,16 +116,17 @@ func buildAndPublishDockerService(ecr *registry.ECR, serviceName, dockerfilePath
 	}, nil
 }
 
-func buildAndPublishGoService(ctx context.Context, cmdDir, serviceName, baseURL, baseImage, namespace string, tags []string, authOption publish.Option) (*Image, error) {
+func buildAndPublishGoService(ctx context.Context, cmdDir, serviceName, baseURL, baseImage, namespace string, tags []string, publishAuthOption publish.Option, remoteAuthOption remote.Option) (*Image, error) {
 	b, err := build.NewGo(ctx, cmdDir,
 		build.WithPlatforms("linux/amd64"),
 		build.WithDisabledSBOM(),
 		build.WithBaseImages(func(ctx context.Context, _ string) (name.Reference, build.Result, error) {
+			baseImage = strings.ReplaceAll(baseImage, "BASE_URL", baseURL)
 			ref, err := name.ParseReference(baseImage)
 			if err != nil {
 				return nil, nil, err
 			}
-			base, err := remote.Index(ref, remote.WithContext(ctx))
+			base, err := remote.Index(ref, remote.WithContext(ctx), remoteAuthOption)
 			return ref, base, err
 		}),
 	)
@@ -145,7 +147,7 @@ func buildAndPublishGoService(ctx context.Context, cmdDir, serviceName, baseURL,
 
 	p, err := publish.NewDefault(baseURL,
 		publish.WithTags(tags),
-		authOption,
+		publishAuthOption,
 	)
 	if err != nil {
 		return nil, errors.Wrap(err, "authenticate to image repo")
@@ -178,7 +180,8 @@ func registryCommand(ctx context.Context, cmd *cobra.Command, _ []string, regist
 		return errors.Wrap(err, "get services config")
 	}
 
-	authOption := publish.WithAuthFromKeychain(authn.DefaultKeychain)
+	publishAuthOption := publish.WithAuthFromKeychain(authn.DefaultKeychain)
+	remoteAuthOption := remote.WithAuthFromKeychain(authn.DefaultKeychain)
 	maxGoRoutines, err := cmd.Flags().GetInt("max-go-routines")
 	if err != nil {
 		return errors.Wrap(err, "failed getting max-go-routines flag")
@@ -228,7 +231,7 @@ func registryCommand(ctx context.Context, cmd *cobra.Command, _ []string, regist
 			tags := service.GetTags()
 			baseImage := service.GetBaseImage()
 
-			image, err := buildAndPublishGoService(ctx, service.Main, service.Name, baseURL, baseImage, namespace, tags, authOption)
+			image, err := buildAndPublishGoService(ctx, service.Main, service.Name, baseURL, baseImage, namespace, tags, publishAuthOption, remoteAuthOption)
 			if err != nil {
 				return errors.Wrap(err, "build and push go service")
 			}
