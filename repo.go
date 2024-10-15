@@ -169,7 +169,12 @@ func buildAndPublishGoService(ctx context.Context, cmdDir, serviceName, baseURL,
 	}, nil
 }
 
-func registryCommand(ctx context.Context, cmd *cobra.Command, _ []string, registryName string, remoteBuild bool) error {
+func registryCommand(ctx context.Context, cmd *cobra.Command, _ []string, registryName string) error {
+	remoteBuild, err := cmd.Flags().GetBool("remote")
+	if err != nil {
+		return errors.Wrap(err, "failed getting remote flag")
+	}
+
 	configPath, err := cmd.Flags().GetString("config")
 	if err != nil {
 		return errors.Wrap(err, "failed getting config flag")

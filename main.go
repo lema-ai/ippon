@@ -64,12 +64,13 @@ func buildRegistryCommand(cmdName string, remoteBuild bool) (*cobra.Command, err
 		Use:   "release",
 		Short: "Build, tag and push an image",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return registryCommand(ctx, cmd, args, cmdName, remoteBuild)
+			return registryCommand(ctx, cmd, args, cmdName)
 		},
 	}
 	releaseCmd.Flags().Int("max-go-routines", 5, "Maximum number of go routines to use for building and pushing images concurrently. Default is 5.")
 	releaseCmd.Flags().String("namespace", "", "Okteto namespace to update the kustomization file with the new image digests")
 	releaseCmd.Flags().String("config", "ippon.yaml", "Path to ippon config file")
+	releaseCmd.Flags().Bool("remote", remoteBuild, "Build and push images to remote registry")
 	registryCmd.AddCommand(releaseCmd)
 
 	createMissingCmd := &cobra.Command{
@@ -102,16 +103,6 @@ func init() {
 }
 
 func main() {
-	oktetoCommand, err := buildRegistryCommand("okteto", true)
-	if err != nil {
-		finishWithError("failed creating okteto command", err)
-	}
-
-	releaseCommand, err := buildRegistryCommand("prod", false)
-	if err != nil {
-		finishWithError("failed creating release command", err)
-	}
-
 	// so we don't require everyone to install yq directly
 	// thankfully it's written in Go and with cobra!
 	yqCmd := yqcmd.New()
@@ -132,6 +123,16 @@ func main() {
 			}
 			return nil
 		},
+	}
+
+	oktetoCommand, err := buildRegistryCommand("okteto", true)
+	if err != nil {
+		finishWithError("failed creating okteto command", err)
+	}
+
+	releaseCommand, err := buildRegistryCommand("prod", false)
+	if err != nil {
+		finishWithError("failed creating release command", err)
 	}
 
 	rootCmd.PersistentFlags().Bool("verbose", false, "verbose output")
