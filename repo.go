@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"log"
 	"os"
@@ -69,14 +68,8 @@ func buildDockerImage(repoName, dockerfilePath, target string, tags []string, re
 	return buildCmd.Run()
 }
 
-type dockerManifest struct {
-	Descriptor struct {
-		Digest string `json:"digest"`
-	} `json:"Descriptor"`
-}
-
 func getDockerImageDigest(repoName, tag string) (string, error) {
-	digestArgs := []string{"manifest", "inspect", "--verbose", fmt.Sprintf("%s:%s", repoName, tag)}
+	digestArgs := []string{"inspect", "--format='{{index (split (index .RepoDigests 0) \"@\") 1}}'", fmt.Sprintf("%s:%s", repoName, tag)}
 	digestCmd := exec.Command("docker", digestArgs...)
 	digestCmd.Stderr = os.Stderr
 
@@ -85,14 +78,7 @@ func getDockerImageDigest(repoName, tag string) (string, error) {
 		return "", errors.Wrap(err, "get docker image digest")
 	}
 
-	var manifests []dockerManifest
-	err = json.Unmarshal(digestBytes, &manifests)
-	if err != nil || len(manifests) == 0 {
-		fmt.Println(string(digestBytes))
-		return "", errors.Wrap(err, "unmarshal docker manifest")
-	}
-
-	return manifests[0].Descriptor.Digest, nil
+	return strings.ReplaceAll(strings.TrimSpace(string(digestBytes)), "'", ""), nil
 }
 
 func buildAndPublishDockerService(ecr *registry.ECR, serviceName, dockerfilePath, target, namespace string, tags []string, remoteBuild bool) (*Image, error) {
