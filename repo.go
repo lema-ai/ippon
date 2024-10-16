@@ -88,7 +88,7 @@ func buildAndPublishGoService(ctx context.Context, cmdDir, serviceName, baseURL,
 			if err != nil {
 				return nil, nil, err
 			}
-			base, err := remote.Index(ref, remote.WithContext(ctx), remoteAuthOption)
+			base, err := remote.Index(ref, remote.WithContext(ctx))
 			return ref, base, err
 		}),
 	)
