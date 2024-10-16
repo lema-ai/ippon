@@ -24,3 +24,5 @@ go.work
 ippon
 
 tests
+
+*.code-workspace

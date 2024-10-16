@@ -9,6 +9,9 @@ import (
 	"path"
 	"strings"
 
+	ecr "github.com/awslabs/amazon-ecr-credential-helper/ecr-login"
+	"github.com/awslabs/amazon-ecr-credential-helper/ecr-login/api"
+
 	"github.com/google/go-containerregistry/pkg/authn"
 	"github.com/google/go-containerregistry/pkg/name"
 	"github.com/google/go-containerregistry/pkg/v1/remote"
@@ -20,33 +23,6 @@ import (
 	"github.com/spf13/cobra"
 	"golang.org/x/sync/errgroup"
 )
-
-func authDockerEcr(accountId, region string) error {
-	awsAuthArgs := []string{"ecr", "get-login-password", "--region", region}
-	dockerLoginArgs := []string{"login", "--username", "AWS", "--password-stdin", fmt.Sprintf("%s.dkr.ecr.%s.amazonaws.com", accountId, region)}
-	awsAuthCmd := exec.Command("aws", awsAuthArgs...)
-	dockerLoginCmd := exec.Command("docker", dockerLoginArgs...)
-
-	var err error
-	dockerLoginCmd.Stdin, err = awsAuthCmd.StdoutPipe()
-	if err != nil {
-		return errors.Wrap(err, "Failed getting aws auth command stdout")
-	}
-
-	dockerLoginCmd.Stdout = os.Stdout
-	dockerLoginCmd.Stderr = os.Stderr
-	err = dockerLoginCmd.Start()
-	if err != nil {
-		return errors.Wrap(err, "Failed starting docker login command")
-	}
-
-	err = awsAuthCmd.Run()
-	if err != nil {
-		return errors.Wrap(err, "Failed running aws auth command")
-	}
-
-	return dockerLoginCmd.Wait()
-}
 
 func buildDockerImage(repoName, dockerfilePath, target string, tags []string, remoteBuild bool) error {
 	buildArgs := []string{"buildx", "build", "--output", "type=registry", "--platform=linux/amd64", "--progress=plain", "--push"}
@@ -171,8 +147,12 @@ func registryCommand(ctx context.Context, cmd *cobra.Command, _ []string, regist
 		return errors.Wrap(err, "get services config")
 	}
 
-	publishAuthOption := publish.WithAuthFromKeychain(authn.DefaultKeychain)
-	remoteAuthOption := remote.WithAuthFromKeychain(authn.DefaultKeychain)
+	ecrHelper := ecr.NewECRHelper(ecr.WithClientFactory(api.DefaultClientFactory{}))
+	defaultKeychain := authn.DefaultKeychain
+	multiKeychain := authn.NewMultiKeychain(defaultKeychain, authn.NewKeychainFromHelper(ecrHelper))
+
+	publishAuthOption := publish.WithAuthFromKeychain(multiKeychain)
+	remoteAuthOption := remote.WithAuthFromKeychain(defaultKeychain)
 	maxGoRoutines, err := cmd.Flags().GetInt("max-go-routines")
 	if err != nil {
 		return errors.Wrap(err, "failed getting max-go-routines flag")
@@ -189,11 +169,6 @@ func registryCommand(ctx context.Context, cmd *cobra.Command, _ []string, regist
 	imagesChan := make(chan *Image, len(config.ServicesConfig.GoServices)+lenDockerServices)
 	g := errgroup.Group{}
 	g.SetLimit(maxGoRoutines)
-
-	err = authDockerEcr(config.ECR.AccountId(), config.ECR.Region())
-	if err != nil {
-		return errors.Wrap(err, "auth docker ecr")
-	}
 
 	for _, service := range config.ServicesConfig.DockerServices {
 		service := service
