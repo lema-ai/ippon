@@ -7,6 +7,7 @@ import (
 	"io"
 	"log"
 	"os"
+	"runtime/debug"
 
 	"github.com/google/ko/pkg/publish"
 	yqcmd "github.com/mikefarah/yq/v4/cmd"
@@ -137,8 +138,34 @@ func main() {
 
 	rootCmd.PersistentFlags().Bool("verbose", false, "verbose output")
 	rootCmd.AddCommand(oktetoCommand, releaseCommand, yqCmd)
+	rootCmd.Version = Version()
 	err = rootCmd.Execute()
 	if err != nil {
 		finishWithError("failed executing command", err)
 	}
+}
+
+func Version() string {
+	v, err := getGitVersion()
+	if err != nil {
+		return "(unknown)"
+	}
+	return v
+}
+
+func getGitVersion() (string, error) {
+	buildInfo, ok := debug.ReadBuildInfo()
+	if !ok {
+		return "", errors.New("failed reading build info")
+	}
+	version := buildInfo.Main.Version
+	if version == "(devel)" {
+		for _, setting := range buildInfo.Settings {
+			if setting.Key == "vcs.revision" {
+				return setting.Value, nil
+			}
+		}
+	}
+
+	return version, nil
 }
