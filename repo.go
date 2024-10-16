@@ -88,7 +88,11 @@ func buildAndPublishGoService(ctx context.Context, cmdDir, serviceName, baseURL,
 			if err != nil {
 				return nil, nil, err
 			}
-			base, err := remote.Index(ref, remote.WithContext(ctx))
+			if remoteAuthOption == nil {
+				base, err := remote.Index(ref, remote.WithContext(ctx))
+				return ref, base, err
+			}
+			base, err := remote.Index(ref, remote.WithContext(ctx), remoteAuthOption)
 			return ref, base, err
 		}),
 	)
@@ -152,7 +156,8 @@ func registryCommand(ctx context.Context, cmd *cobra.Command, _ []string, regist
 	multiKeychain := authn.NewMultiKeychain(defaultKeychain, authn.NewKeychainFromHelper(ecrHelper))
 
 	publishAuthOption := publish.WithAuthFromKeychain(multiKeychain)
-	remoteAuthOption := remote.WithAuthFromKeychain(defaultKeychain)
+	remoteAuthOption := remote.WithAuthFromKeychain(multiKeychain)
+
 	maxGoRoutines, err := cmd.Flags().GetInt("max-go-routines")
 	if err != nil {
 		return errors.Wrap(err, "failed getting max-go-routines flag")
@@ -196,8 +201,13 @@ func registryCommand(ctx context.Context, cmd *cobra.Command, _ []string, regist
 			baseURL := config.ECR.URL()
 			tags := service.GetTags()
 			baseImage := service.GetBaseImage()
+			remoteAuth := remoteAuthOption
 
-			image, err := buildAndPublishGoService(ctx, service.Main, service.Name, baseURL, baseImage, namespace, tags, publishAuthOption, remoteAuthOption)
+			if baseImage == defaultBaseImage {
+				remoteAuth = nil
+			}
+
+			image, err := buildAndPublishGoService(ctx, service.Main, service.Name, baseURL, baseImage, namespace, tags, publishAuthOption, remoteAuth)
 			if err != nil {
 				return errors.Wrap(err, "build and push go service")
 			}
