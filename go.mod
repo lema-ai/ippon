@@ -2,8 +2,6 @@ module github.com/lema-ai/ippon
 
 go 1.22.7
 
-toolchain go1.23.4
-
 require (
 	github.com/aws/aws-sdk-go-v2/config v1.27.33
 	github.com/aws/aws-sdk-go-v2/service/ecr v1.28.0

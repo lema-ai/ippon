@@ -2,11 +2,8 @@ package main
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"log"
-	"os"
-	"os/exec"
 	"path"
 	"strings"
 
@@ -20,32 +17,6 @@ import (
 	"github.com/spf13/cobra"
 	"golang.org/x/sync/errgroup"
 )
-
-type dockerManifest struct {
-	Descriptor struct {
-		Digest string `json:"digest"`
-	} `json:"Descriptor"`
-}
-
-func getDockerImageDigest(repoName, tag string) (string, error) {
-	digestArgs := []string{"manifest", "inspect", "--verbose", fmt.Sprintf("%s:%s", repoName, tag)}
-	digestCmd := exec.Command("docker", digestArgs...)
-	digestCmd.Stderr = os.Stderr
-
-	digestBytes, err := digestCmd.Output()
-	if err != nil {
-		return "", errors.Wrap(err, "get docker image digest")
-	}
-
-	var manifests []dockerManifest
-	err = json.Unmarshal(digestBytes, &manifests)
-	if err != nil || len(manifests) == 0 {
-		fmt.Println(string(digestBytes))
-		return "", errors.Wrap(err, "unmarshal docker manifest")
-	}
-
-	return manifests[0].Descriptor.Digest, nil
-}
 
 func buildAndPublishGoService(ctx context.Context, cmdDir, serviceName, baseURL, baseImage, namespace string, tags []string, publishAuthOption publish.Option, remoteAuthOption remote.Option) (*Image, error) {
 	b, err := build.NewGo(ctx, cmdDir,
