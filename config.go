@@ -15,29 +15,12 @@ type Config struct {
 }
 
 type ServicesConfig struct {
-	GoServices     []GoServiceConfig     `mapstructure:"go_services"`
-	DockerServices []DockerServiceConfig `mapstructure:"docker_services"`
-}
-
-type DockerServiceConfig struct {
-	Tags       []string `mapstructure:"tags"`
-	Dockerfile string   `mapstructure:"dockerfile"`
-	// For multi-target build files.
-	// If nothing is passed here, will build a single target with the configured Name.
-	TargetsOrder []Target `mapstructure:"targets_order"`
+	GoServices []GoServiceConfig `mapstructure:"go_services"`
 }
 
 type Target struct {
 	Name   string `mapstructure:"name"`
 	Target string `mapstructure:"target"`
-}
-
-func (this DockerServiceConfig) GetTags() []string {
-	if this.Tags != nil {
-		return this.Tags
-	}
-
-	return viper.GetStringSlice("tags")
 }
 
 type GoServiceConfig struct {

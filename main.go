@@ -50,7 +50,7 @@ func tryCallParentPersistentPreRun(cmd *cobra.Command, args []string) error {
 	return nil
 }
 
-func buildRegistryCommand(cmdName string, remoteBuild bool) (*cobra.Command, error) {
+func buildRegistryCommand(cmdName string) (*cobra.Command, error) {
 	ctx := context.Background()
 	registryCmd := &cobra.Command{
 		Use:  cmdName,
@@ -64,7 +64,7 @@ func buildRegistryCommand(cmdName string, remoteBuild bool) (*cobra.Command, err
 		Use:   "release",
 		Short: "Build, tag and push an image",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return registryCommand(ctx, cmd, args, cmdName, remoteBuild)
+			return registryCommand(ctx, cmd, args, cmdName)
 		},
 	}
 	releaseCmd.Flags().Int("max-go-routines", 5, "Maximum number of go routines to use for building and pushing images concurrently. Default is 5.")
@@ -102,12 +102,12 @@ func init() {
 }
 
 func main() {
-	oktetoCommand, err := buildRegistryCommand("okteto", true)
+	oktetoCommand, err := buildRegistryCommand("okteto")
 	if err != nil {
 		finishWithError("failed creating okteto command", err)
 	}
 
-	releaseCommand, err := buildRegistryCommand("prod", false)
+	releaseCommand, err := buildRegistryCommand("prod")
 	if err != nil {
 		finishWithError("failed creating release command", err)
 	}
