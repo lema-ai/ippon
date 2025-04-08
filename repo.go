@@ -102,19 +102,29 @@ func registryCommand(ctx context.Context, cmd *cobra.Command, _ []string, regist
 	g := errgroup.Group{}
 	g.SetLimit(maxGoRoutines)
 
-	for _, service := range config.ServicesConfig.GoServices {
-		service := service
-		g.Go(func() error {
-			log.Printf("ippon building go service: %+v\n", service)
-			baseURL := config.ECR.URL()
-			tags := service.GetTags()
-			baseImage := service.GetBaseImage()
+	for i, service := range config.ServicesConfig.GoServices {
+		// Build the first service separately to warm up the cache
+		// NOTE: This assumes that the first service will include a lot of the dependencies that other services will need
+		if i == 0 {
+			log.Printf("ippon building first go service separately to warm up the cache: %+v\n", service)
 
-			image, err := buildAndPublishGoService(ctx, service.Main, service.Name, baseURL, baseImage, namespace, tags, publishAuthOption, remoteAuthOption)
+			image, err := buildAndPublishService(ctx, service, config.ECR.URL(), namespace, publishAuthOption, remoteAuthOption)
 			if err != nil {
 				return errors.Wrap(err, "build and push go service")
 			}
+			imagesChan <- image
+			continue
+		}
 
+		// Build remaining services in parallel
+		service := service
+		g.Go(func() error {
+			log.Printf("ippon building go service: %+v\n", service)
+
+			image, err := buildAndPublishService(ctx, service, config.ECR.URL(), namespace, publishAuthOption, remoteAuthOption)
+			if err != nil {
+				return errors.Wrap(err, "build and push go service")
+			}
 			imagesChan <- image
 			return nil
 		})
@@ -129,6 +139,17 @@ func registryCommand(ctx context.Context, cmd *cobra.Command, _ []string, regist
 		return nil
 	}
 	return updateK8sDeployment(namespace, imagesChan)
+}
+
+// Helper function to extract common build and publish logic
+func buildAndPublishService(ctx context.Context, service GoServiceConfig, baseURL, namespace string,
+	publishAuthOption publish.Option, remoteAuthOption remote.Option) (*Image, error) {
+	tags := service.GetTags()
+	baseImage := service.GetBaseImage()
+
+	// TODO: can probably separate build and publish in a different goroutine than build (io vs cpu)
+	return buildAndPublishGoService(ctx, service.Main, service.Name, baseURL, baseImage,
+		namespace, tags, publishAuthOption, remoteAuthOption)
 }
 
 func createMissingReposCommand(ctx context.Context, cmd *cobra.Command, _ []string, registryName string) error {
