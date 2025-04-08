@@ -104,11 +104,8 @@ func registryCommand(ctx context.Context, cmd *cobra.Command, _ []string, regist
 
 	for i, service := range config.ServicesConfig.GoServices {
 		// Build the first service separately to warm up the cache
+		// NOTE: This assumes that the first service will include a lot of the dependencies that other services will need
 		if i == 0 {
-			// Assert that the first service is "inventory" (we want a big service to be first for the cache warmup)
-			if service.Name != "inventory" {
-				return errors.New("expected inventory service to be first")
-			}
 			log.Printf("ippon building first go service separately to warm up the cache: %+v\n", service)
 
 			image, err := buildAndPublishService(ctx, service, config.ECR.URL(), namespace, publishAuthOption, remoteAuthOption)
