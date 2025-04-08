@@ -102,7 +102,28 @@ func registryCommand(ctx context.Context, cmd *cobra.Command, _ []string, regist
 	g := errgroup.Group{}
 	g.SetLimit(maxGoRoutines)
 
-	for _, service := range config.ServicesConfig.GoServices {
+	for i, service := range config.ServicesConfig.GoServices {
+		// Build the first service separately to warm up the cache
+		if i == 0 {
+			// Assert that the first service is "inventory" (we want a big service to be first for the cache warmup)
+			if service.Name != "inventory" {
+				return errors.New("expected inventory service to be first")
+			}
+			log.Printf("ippon building first go service separately to warm up the cache: %+v\n", service)
+			baseURL := config.ECR.URL()
+			tags := service.GetTags()
+			baseImage := service.GetBaseImage()
+
+			// TODO: can probably separate build and publish in a different goroutine than build (io vs cpu)
+			image, err := buildAndPublishGoService(ctx, service.Main, service.Name, baseURL, baseImage, namespace, tags, publishAuthOption, remoteAuthOption)
+			if err != nil {
+				return errors.Wrap(err, "build and push go service")
+			}
+
+			imagesChan <- image
+			continue
+		}
+
 		service := service
 		g.Go(func() error {
 			log.Printf("ippon building go service: %+v\n", service)
