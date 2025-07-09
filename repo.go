@@ -86,6 +86,26 @@ func registryCommand(ctx context.Context, cmd *cobra.Command, _ []string, regist
 		return errors.Wrap(err, "get services config")
 	}
 
+	// Check if exclude-services flag is set and filter services accordingly
+	excludeServicesPath, err := cmd.Flags().GetString("exclude-services")
+	if err != nil {
+		return errors.Wrap(err, "failed getting exclude-services flag")
+	}
+
+	servicesToBuild := config.ServicesConfig.GoServices
+	if excludeServicesPath != "" {
+		excludedServices, fileExists, err := readExcludedServices(excludeServicesPath)
+		if err != nil {
+			return errors.Wrap(err, "failed reading excluded services")
+		}
+		if !fileExists {
+			log.Printf("ippon build: warning - excluded services file not found at %s, building all services\n", excludeServicesPath)
+		} else {
+			servicesToBuild = filterServices(config.ServicesConfig.GoServices, excludedServices)
+			log.Printf("ippon build: building %d services\n", len(servicesToBuild))
+		}
+	}
+
 	publishAuthOption := publish.WithAuthFromKeychain(authn.DefaultKeychain)
 	remoteAuthOption := remote.WithAuthFromKeychain(authn.DefaultKeychain)
 	maxGoRoutines, err := cmd.Flags().GetInt("max-go-routines")
@@ -98,11 +118,11 @@ func registryCommand(ctx context.Context, cmd *cobra.Command, _ []string, regist
 		return errors.Wrap(err, "failed getting namespace flag")
 	}
 
-	imagesChan := make(chan *Image, len(config.ServicesConfig.GoServices))
+	imagesChan := make(chan *Image, len(servicesToBuild))
 	g := errgroup.Group{}
 	g.SetLimit(maxGoRoutines)
 
-	for i, service := range config.ServicesConfig.GoServices {
+	for i, service := range servicesToBuild {
 		// Build the first service separately to warm up the cache
 		// NOTE: This assumes that the first service will include a lot of the dependencies that other services will need
 		if i == 0 {

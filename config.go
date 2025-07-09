@@ -7,6 +7,7 @@ import (
 	"github.com/lema-ai/ippon/registry"
 	"github.com/pkg/errors"
 	"github.com/spf13/viper"
+	"gopkg.in/yaml.v2"
 )
 
 type Config struct {
@@ -28,6 +29,10 @@ type GoServiceConfig struct {
 	Tags      []string `mapstructure:"tags"`
 	Main      string   `mapstructure:"main"`
 	BaseImage string   `mapstructure:"base_image"`
+}
+
+type ExcludedServices struct {
+	Services []string `yaml:"services"`
 }
 
 func (this GoServiceConfig) GetTags() []string {
@@ -78,4 +83,48 @@ func getConfig(registryName, path string) (*Config, error) {
 	}
 
 	return config, nil
+}
+
+func readExcludedServices(excludeServicesPath string) ([]string, bool, error) {
+	// Check if the file exists
+	if _, err := os.Stat(excludeServicesPath); os.IsNotExist(err) {
+		return []string{}, false, nil // Return empty slice and false if file doesn't exist
+	}
+	
+	// Read the file
+	data, err := os.ReadFile(excludeServicesPath)
+	if err != nil {
+		return nil, false, errors.Wrap(err, "failed reading excluded services file")
+	}
+	
+	// Parse the YAML
+	var excluded ExcludedServices
+	err = yaml.Unmarshal(data, &excluded)
+	if err != nil {
+		return nil, false, errors.Wrap(err, "failed parsing excluded services file")
+	}
+	
+	return excluded.Services, true, nil
+}
+
+func filterServices(services []GoServiceConfig, excludedServices []string) []GoServiceConfig {
+	if len(excludedServices) == 0 {
+		return services
+	}
+	
+	// Create a map for faster lookup
+	excludedMap := make(map[string]bool)
+	for _, service := range excludedServices {
+		excludedMap[service] = true
+	}
+	
+	// Filter services
+	var filteredServices []GoServiceConfig
+	for _, service := range services {
+		if !excludedMap[service.Name] {
+			filteredServices = append(filteredServices, service)
+		}
+	}
+	
+	return filteredServices
 }
