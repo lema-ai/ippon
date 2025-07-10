@@ -35,6 +35,7 @@ const (
 	defaultBaseImage = "cgr.dev/chainguard/busybox:latest"
 	configFileName   = "ippon"
 	configEnvPrefix  = "IPPON"
+	version          = "v0.2.4"
 )
 
 var (
@@ -70,6 +71,7 @@ func buildRegistryCommand(cmdName string) (*cobra.Command, error) {
 	releaseCmd.Flags().Int("max-go-routines", 5, "Maximum number of go routines to use for building and pushing images concurrently. Default is 5.")
 	releaseCmd.Flags().String("namespace", "", "Okteto namespace to update the kustomization file with the new image digests")
 	releaseCmd.Flags().String("config", "ippon.yaml", "Path to ippon config file")
+	releaseCmd.Flags().String("exclude-services", "", "Path to YAML file containing services to exclude from build")
 	registryCmd.AddCommand(releaseCmd)
 
 	createMissingCmd := &cobra.Command{
@@ -81,6 +83,7 @@ func buildRegistryCommand(cmdName string) (*cobra.Command, error) {
 	}
 	createMissingCmd.Flags().String("namespace", "", "Okteto namespace to use for the missing repositories")
 	createMissingCmd.Flags().String("config", "ippon.yaml", "Path to ippon config file")
+	createMissingCmd.Flags().String("exclude-services", "", "Path to YAML file containing services to exclude from repository creation")
 	registryCmd.AddCommand(createMissingCmd)
 
 	return registryCmd, nil
@@ -117,9 +120,10 @@ func main() {
 	yqCmd := yqcmd.New()
 
 	rootCmd := &cobra.Command{
-		Use:   "ippon",
-		Short: "Ippon build and release Go images",
-		Long:  "Ippon make it easy to handle Go images release in a micro-services architecture",
+		Use:     "ippon",
+		Short:   "Ippon build and release Go images",
+		Long:    "Ippon make it easy to handle Go images release in a micro-services architecture",
+		Version: version,
 		PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
 			verbose, err := cmd.Flags().GetBool("verbose")
 			if err != nil {
