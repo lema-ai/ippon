@@ -94,6 +94,7 @@ func registryCommand(ctx context.Context, cmd *cobra.Command, _ []string, regist
 
 	servicesToBuild := config.ServicesConfig.GoServices
 	if excludeServicesPath != "" {
+		log.Printf("ippon build: excluding services from %s\n", excludeServicesPath)
 		excludedServices, fileExists, err := readExcludedServices(excludeServicesPath)
 		if err != nil {
 			return errors.Wrap(err, "failed reading excluded services")
