@@ -35,6 +35,7 @@ const (
 	defaultBaseImage = "cgr.dev/chainguard/busybox:latest"
 	configFileName   = "ippon"
 	configEnvPrefix  = "IPPON"
+	version          = "v0.2.4"
 )
 
 var (
@@ -119,9 +120,10 @@ func main() {
 	yqCmd := yqcmd.New()
 
 	rootCmd := &cobra.Command{
-		Use:   "ippon",
-		Short: "Ippon build and release Go images",
-		Long:  "Ippon make it easy to handle Go images release in a micro-services architecture",
+		Use:     "ippon",
+		Short:   "Ippon build and release Go images",
+		Long:    "Ippon make it easy to handle Go images release in a micro-services architecture",
+		Version: version,
 		PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
 			verbose, err := cmd.Flags().GetBool("verbose")
 			if err != nil {
