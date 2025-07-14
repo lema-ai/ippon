@@ -7,6 +7,7 @@ import (
 	"io"
 	"log"
 	"os"
+	"runtime/debug"
 
 	"github.com/google/ko/pkg/publish"
 	yqcmd "github.com/mikefarah/yq/v4/cmd"
@@ -35,11 +36,11 @@ const (
 	defaultBaseImage = "cgr.dev/chainguard/busybox:latest"
 	configFileName   = "ippon"
 	configEnvPrefix  = "IPPON"
-	version          = "v0.2.4"
 )
 
 var (
 	outputBuffer bytes.Buffer // easier debugging in case of errors, buffer to store output when running in non verbose mode
+	version      = "dev"
 )
 
 func tryCallParentPersistentPreRun(cmd *cobra.Command, args []string) error {
@@ -96,6 +97,10 @@ func finishWithError(msg string, err error) {
 }
 
 func init() {
+	if info, ok := debug.ReadBuildInfo(); ok && info.Main.Version != "(devel)" {
+		version = info.Main.Version
+	}
+
 	viper.SetConfigName(configFileName)
 	viper.SetConfigType("yaml")
 	viper.AddConfigPath(".")
